@@ -45,7 +45,7 @@ SPLASH = f"""{Fore.YELLOW}{Style.BRIGHT}
  | |/ / _ \\/ ___|| | | | / \\  |  _ \\ \\ / /
  | ' / | | \\___ \\| |_| |/ _ \\ | |_) \\ V / 
  | . \\ |_| |___) |  _  / ___ \\|  _ < | |  
- |_|\\_\\___/|____/|_| |_/_/   \\_\\_| \\_\\|_|  {Fore.CYAN}[BETA v2.5]{Style.RESET_ALL}
+ |_|\\_\\___/|____/|_| |_/_/   \\_\\_| \\_\\|_|  {Fore.CYAN}[BETA v0.1]{Style.RESET_ALL}
 {Fore.WHITE}      Autonomous Multi-Agent CTF Framework{Style.RESET_ALL}
 """
 
