@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -41,10 +42,10 @@ except Exception:
 
 SPLASH = f"""{Fore.YELLOW}{Style.BRIGHT}
   _  _____  ____  _   _   _    ______   __
- | |/ / _ \/ ___|| | | | / \  |  _ \ \ / /
- | ' / | | \___ \| |_| |/ _ \ | |_) \ V / 
- | . \ |_| |___) |  _  / ___ \|  _ < | |  
- |_|\_\___/|____/|_| |_/_/   \_\_| \_\|_|  {Fore.CYAN}[BETA v2.5]{Style.RESET_ALL}
+ | |/ / _ \\/ ___|| | | | / \\  |  _ \\ \\ / /
+ | ' / | | \\___ \\| |_| |/ _ \\ | |_) \\ V / 
+ | . \\ |_| |___) |  _  / ___ \\|  _ < | |  
+ |_|\\_\\___/|____/|_| |_/_/   \\_\\_| \\_\\|_|  {Fore.CYAN}[BETA v2.5]{Style.RESET_ALL}
 {Fore.WHITE}      Autonomous Multi-Agent CTF Framework{Style.RESET_ALL}
 """
 
@@ -236,6 +237,31 @@ def choose_route(category: str, routing: Dict[str, str]) -> Optional[str]:
     return None
 
 
+def category_matches_filter(category: str, category_filter: str, routing: Dict[str, str]) -> bool:
+    category_name = category.lower().strip()
+    filter_name = category_filter.lower().strip()
+
+    if not filter_name:
+        return False
+    if filter_name in category_name or category_name in filter_name:
+        return True
+
+    alias_groups = (
+        {"pwn", "binary", "binary exploitation"},
+        {"dfir", "forensics"},
+        {"rev", "reverse", "reverse engineering"},
+        {"crypto", "cryptography"},
+        {"web", "web exploitation"},
+        {"misc", "miscellaneous"},
+        {"mobile", "android"},
+    )
+    for aliases in alias_groups:
+        if filter_name in aliases and any(alias in category_name for alias in aliases):
+            return True
+
+    return False
+
+
 def choose_model_key(route: str, category: str) -> str:
     c = category.lower()
     if route == "gemini":
@@ -252,7 +278,34 @@ def choose_model_key(route: str, category: str) -> str:
         if "mobile" in c or "android" in c:
             return "codex_mobile"
         return "codex_crypto"
+    if route == "claude":
+        return "claude"
     raise ValueError(f"Unknown route: {route}")
+
+
+def check_model_availability(config: Dict[str, Any]) -> set[str]:
+    available: set[str] = set()
+    known_models = ("gemini", "codex", "claude")
+
+    log_step("Checking available AI model CLIs...")
+    for model in known_models:
+        if shutil.which(model):
+            available.add(model)
+            log_ok(f"Available model: {model}")
+
+    if not available:
+        log_err("No AI model CLIs are available on this system. Checked: gemini, codex, claude.")
+        sys.exit(1)
+
+    log_info(f"Available models on this system: {', '.join(sorted(available))}")
+
+    missing_routes = sorted({route for route in config.get("routing", {}).values() if route not in available})
+    for route in missing_routes:
+        categories = sorted(key for key, value in config.get("routing", {}).items() if value == route)
+        categories_text = ", ".join(categories) if categories else "unknown categories"
+        log_warn(f"Configured model '{route}' is not available. Affected categories: {categories_text}")
+
+    return available
 
 
 def clean_model_output(text: str) -> str:
@@ -276,7 +329,7 @@ def clean_model_output(text: str) -> str:
     # If no markers found, return original (fallback)
     if not cleaned:
         # Just strip common runner prefix lines if they exist
-        return "\n".join([l for line in lines if not l.startswith("[runner]")])
+        return "\n".join([line for line in lines if not line.startswith("[runner]")])
         
     return "\n".join(cleaned).strip()
 
@@ -858,6 +911,7 @@ def main() -> int:
     root = Path(".").resolve()
     load_env(root / ".env")
     config = load_json(root / "config.json")
+    available_models = check_model_availability(config)
 
     # CLI Overrides
     if args.url: config["ctf"]["base_url"] = args.url.rstrip("/")
@@ -914,10 +968,16 @@ def main() -> int:
         route = choose_route(s["category"], config["routing"])
         
         included = True
-        if cat_inc and not any(x in cname for x in cat_inc): included = False
+        if cat_inc and not any(category_matches_filter(s["category"], x, config["routing"]) for x in cat_inc):
+            included = False
         if not route:
             included = False
             if status == "OPEN": status = "UNSUPPORTED"
+        elif route not in available_models:
+            included = False
+            if status == "OPEN":
+                status = f"MODEL MISSING ({route})"
+            log_warn(f"Category '{s['category']}' is configured to use model '{route}', but that model is not available on this system.")
 
         _p(f"{cid:<4} | {s['name'][:35]:<35} | {s['category']:<20} | {status}")
         if status == "OPEN" and included:

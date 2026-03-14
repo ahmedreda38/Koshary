@@ -126,7 +126,7 @@ def main():
                 else:
                     log_err(f"Polling error: {e}")
             
-            time.sleep(0.5)
+            time.sleep(args.interval)
             
     except KeyboardInterrupt:
         log_warn("\nMonitoring stopped by user.")
