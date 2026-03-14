@@ -47,6 +47,13 @@ python3 orchestrator.py --url https://ctf.example.com --categories "Web,Crypto" 
 
 ## Utilities
 
+### Setup Utility
+The `setup_ctf.py` script automates the initial configuration for a new competition. It updates the `.env` session token and the `config.json` target URL and flag format.
+
+```bash
+python3 setup_ctf.py --url https://ctf.example.com --session "your_session_value" --flag "MyCTF{}"
+```
+
 ### First Blood Utility
 The `first_blood.py` script is designed to be executed immediately before a competition starts. It continuously polls the CTFd API and, as soon as challenges are released, automatically extracts and submits flags for introductory and social challenges.
 

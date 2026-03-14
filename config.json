@@ -1,10 +1,10 @@
 {
   "ctf": {
-    "name": "UTCTF",
-    "base_url": "https://utctf.live",
+    "name": "Cyctf Luxor",
+    "base_url": "https://cyctf-luxor.ctfd.io",
     "flag_patterns": [
-      "utflag\\{[^\\s]+\\}",
-      "UTFLAG\\{[^\\s]+\\}",
+      "CyCTF\\{[^\\s]+\\}",
+      "cyctf\\{[^\\s]+\\}",
       "flag\\{[^\\s]+\\}",
       "CTF\\{[^\\s]+\\}"
     ],
