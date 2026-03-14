@@ -48,10 +48,19 @@ python3 orchestrator.py --url https://ctf.example.com --categories "Web,Crypto" 
 ## Utilities
 
 ### First Blood Utility
-The `first_blood.py` script is designed to be executed immediately when a competition starts. It automatically scans for "Sanity Check," "Welcome," or "Rules" challenges, extracts flags from their descriptions, and submits them to secure early points and potential "First Blood" status.
+The `first_blood.py` script is designed to be executed immediately before a competition starts. It continuously polls the CTFd API and, as soon as challenges are released, automatically extracts and submits flags for introductory and social challenges.
+
+**Key Features:**
+- **Continuous Polling**: Monitors the API until it becomes public.
+- **Flag Override**: Submit a known flag (e.g., from Rules/Discord) to all matching challenges automatically.
+- **Auto-Extraction**: Scans descriptions for flag patterns if no override is provided.
 
 ```bash
+# Standard usage (polls every 10s)
 python3 first_blood.py
+
+# High-frequency polling with a known override flag
+python3 first_blood.py --flag "ctf{welcome_2026}" --interval 2
 ```
 
 ## Directory Structure

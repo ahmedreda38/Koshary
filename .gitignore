@@ -4,6 +4,9 @@
 env/
 venv/
 
+# Github token
+.token
+
 # Project specific
 challenges/
 state/
