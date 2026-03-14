@@ -1,0 +1,15 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+
+# Project specific
+challenges/
+state/
+__pycache__/
+*.log
+.lock
+
+# OS
+.DS_Store

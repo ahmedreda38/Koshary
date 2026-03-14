@@ -1,0 +1,12 @@
+{
+  "skills": {
+    "disabled": [
+      "skill-creator",
+      "ctf-pwn",
+      "ctf-crypto",
+      "bughunt",
+      "ctf-web-solver",
+      "ctf-rev"
+    ]
+  }
+}
