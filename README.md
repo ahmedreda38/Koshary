@@ -1,4 +1,4 @@
-# Koshary Framework
+# Koshary Framework (v0.1 - Beta version)
 
 ```text
  _  _____  ____  _   _   _    ______   __
