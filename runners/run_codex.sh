@@ -17,5 +17,5 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 127
 fi
 
-# Use --full-auto and --skip-git-repo-check for non-interactive execution
-codex exec --full-auto --skip-git-repo-check "$(cat "$prompt_file")"
+# Codex exec reads from stdin by default if no prompt argument is given
+cat "$prompt_file" | codex exec --full-auto --skip-git-repo-check

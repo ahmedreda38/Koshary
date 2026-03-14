@@ -1,0 +1,37 @@
+You are solving an authorized CTF reverse engineering challenge.
+
+Challenge: {challenge_name}
+Category: {category}
+Points: {value}
+Round: {round_no}
+
+Description:
+{description}
+
+Connection Info (if any):
+{connection_info}
+
+Execution Environment:
+{env_info}
+
+Working directory:
+{workdir}
+
+Downloaded files:
+{files}
+
+Previous rounds history:
+{history}
+
+Current workspace files:
+{workspace}
+
+Plan for this challenge:
+{plan}
+{walkthrough_instruction}
+
+Your objective:
+1. Analyze the provided binary/files using tools like strings, ltrace, or custom scripts.
+2. If you want code/scripts (e.g., a gdb script or python solver), output the full file content.
+3. If you identify the flag, print only the exact flag on its own line.
+4. If stuck, produce the single highest-value next test.

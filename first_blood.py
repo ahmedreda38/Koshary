@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description="Koshary First Blood Utility")
     parser.add_argument("--flag", help="Override flag to submit to all discovered sanity challenges")
     parser.add_argument("--interval", type=int, default=10, help="Polling interval in seconds (default: 10)")
+    parser.add_argument("--brute-first", type=int, default=10, help="Number of initial IDs to attempt with override flag (default: 10)")
     args = parser.parse_args()
 
     root = Path(".").resolve()
@@ -61,18 +62,20 @@ def main():
                 if summaries:
                     log_ok(f"CTF is ACTIVE! Discovered {len(summaries)} challenges.")
                     
+                    # Sort challenges by ID to identify the first few
+                    summaries.sort(key=lambda x: x["id"])
+                    
+                    # --- PASS 1: Targeted Keyword Match ---
                     for s in summaries:
                         cid = s["id"]
                         name = s["name"]
-                        
                         if s.get("solved_by_me") or cid in solved_ids:
                             continue
                             
                         name_lower = name.lower()
                         if any(kw in name_lower for kw in target_keywords):
-                            log_step(f"Attempting challenge: {name} (ID: {cid})")
+                            log_step(f"Targeting potential sanity: {name} (ID: {cid})")
                             
-                            # Case A: Override flag provided
                             if args.flag:
                                 log_info(f"Submitting override flag to {name}...")
                                 resp = client.submit_flag(cid, args.flag)
@@ -82,13 +85,11 @@ def main():
                                     solved_ids.add(cid)
                                     continue
 
-                            # Case B: Auto-extraction from description
+                            # Auto-extraction
                             detail = client.get_challenge_detail(cid)
                             description = detail.get("description", "")
                             found_flags = extract_flags(description, flag_patterns)
-                            
-                            if not found_flags:
-                                found_flags = extract_flags(name, flag_patterns)
+                            if not found_flags: found_flags = extract_flags(name, flag_patterns)
                                 
                             if found_flags:
                                 for flag in found_flags:
@@ -99,20 +100,33 @@ def main():
                                         log_ok(f"SUCCESS: {name} solved with extracted flag!")
                                         solved_ids.add(cid)
                                         break
-                            else:
-                                log_warn(f"No flag found for {name}. Manual intervention may be required.")
+
+                    # --- PASS 2: First N IDs Fallback (if override flag provided) ---
+                    if args.flag:
+                        log_info(f"Attempting override flag on first {args.brute_first} challenge IDs as fallback...")
+                        for i in range(min(len(summaries), args.brute_first)):
+                            s = summaries[i]
+                            cid = s["id"]
+                            if s.get("solved_by_me") or cid in solved_ids:
+                                continue
+                            
+                            log_info(f"Fallback attempt on ID {cid} ({s['name']})...")
+                            resp = client.submit_flag(cid, args.flag)
+                            msg_text = json.dumps(resp).lower()
+                            if resp.get("success") is True and not any(bad in msg_text for bad in ["incorrect", "wrong"]):
+                                log_ok(f"FALLBACK SUCCESS: {s['name']} (ID: {cid}) solved!")
+                                solved_ids.add(cid)
 
                 else:
                     log_info("CTF not started yet. Waiting for challenges...")
 
             except Exception as e:
-                # Catch 403/404 if API isn't public yet
                 if "403" in str(e) or "404" in str(e):
                     log_info("API access restricted. CTF likely has not started...")
                 else:
                     log_err(f"Polling error: {e}")
             
-            time.sleep(args.interval)
+            time.sleep(0.5)
             
     except KeyboardInterrupt:
         log_warn("\nMonitoring stopped by user.")

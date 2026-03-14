@@ -39,6 +39,23 @@ except Exception:
     Fore = _Dummy()
     Style = _DummyStyle()
 
+SPLASH = f"""{Fore.YELLOW}{Style.BRIGHT}
+  _  _____  ____  _   _   _    ______   __
+ | |/ / _ \/ ___|| | | | / \  |  _ \ \ / /
+ | ' / | | \___ \| |_| |/ _ \ | |_) \ V / 
+ | . \ |_| |___) |  _  / ___ \|  _ < | |  
+ |_|\_\___/|____/|_| |_/_/   \_\_| \_\|_|  {Fore.CYAN}[BETA v2.5]{Style.RESET_ALL}
+{Fore.WHITE}      Autonomous Multi-Agent CTF Framework{Style.RESET_ALL}
+"""
+
+BANNER_CORRECT = f"""{Fore.GREEN}{Style.BRIGHT}
+  ############################################################
+  #                                                          #
+  #   [!] CORRECT FLAG SUBMITTED! MISSION ACCOMPLISHED [!]   #
+  #                                                          #
+  ############################################################
+{Style.RESET_ALL}"""
+
 
 # =========================
 # Global Synchronization
@@ -222,12 +239,46 @@ def choose_route(category: str, routing: Dict[str, str]) -> Optional[str]:
 def choose_model_key(route: str, category: str) -> str:
     c = category.lower()
     if route == "gemini":
+        if "misc" in c:
+            return "gemini_misc"
+        if "forensics" in c or "dfir" in c:
+            return "gemini_forensics"
         return "gemini"
     if route == "codex":
         if "pwn" in c or "binary" in c:
             return "codex_pwn"
+        if "rev" in c or "reverse" in c:
+            return "codex_rev"
+        if "mobile" in c or "android" in c:
+            return "codex_mobile"
         return "codex_crypto"
     raise ValueError(f"Unknown route: {route}")
+
+
+def clean_model_output(text: str) -> str:
+    """
+    Strips runner-specific headers and logs to keep the AI context clean.
+    """
+    lines = text.splitlines()
+    cleaned = []
+    capture = False
+    
+    # Common markers for the end of runner headers
+    markers = ["codex output begins", "gemini output begins", "---"]
+    
+    for line in lines:
+        if any(marker in line.lower() for marker in markers):
+            capture = True
+            continue
+        if capture:
+            cleaned.append(line)
+            
+    # If no markers found, return original (fallback)
+    if not cleaned:
+        # Just strip common runner prefix lines if they exist
+        return "\n".join([l for line in lines if not l.startswith("[runner]")])
+        
+    return "\n".join(cleaned).strip()
 
 
 def collect_workspace_text(chdir: Path, max_files: int = 40, max_chars_per_file: int = 12000) -> str:
@@ -244,7 +295,9 @@ def collect_workspace_text(chdir: Path, max_files: int = 40, max_chars_per_file:
             continue
         if p.name.startswith("."):
             continue
-        if "agent_rounds" in p.parts:
+        
+        # EXCLUSIONS: agent_rounds, plan.md, challenge.json
+        if "agent_rounds" in p.parts or p.name in ["plan.md", "challenge.json"]:
             continue
             
         if p.suffix.lower() not in interesting_ext:
@@ -290,8 +343,18 @@ def collect_history_text(chdir: Path, current_round: int) -> str:
     return "\n\n".join(history)
 
 
-def render_prompt(template_path: Path, chall: Challenge, challenge_dir: Path, round_no: int, workspace: str, history: str, env_info: str = "N/A", plan: str = "No plan generated.") -> str:
+def render_prompt(template_path: Path, chall: Challenge, challenge_dir: Path, round_no: int, workspace: str, history: str, env_info: str = "N/A", plan: str = "No plan generated.", walkthrough_active: bool = False) -> str:
     template = template_path.read_text(encoding="utf-8")
+    
+    walkthrough_instr = ""
+    if walkthrough_active:
+        walkthrough_instr = (
+            "\n[MANDATORY DOCUMENTATION]\n"
+            "If you identify the flag or have a working exploit, you MUST also generate a 'walkthrough.md' file. "
+            "This file should explain: 1) Challenge structure, 2) Identified vulnerabilities/flaws, 3) Detailed exploitation path. "
+            "You can create this file using a fenced code block or a RUN: command."
+        )
+
     return template.format(
         challenge_name=chall.name,
         category=chall.category,
@@ -305,6 +368,7 @@ def render_prompt(template_path: Path, chall: Challenge, challenge_dir: Path, ro
         history=history,
         env_info=env_info,
         plan=plan,
+        walkthrough_instruction=walkthrough_instr
     )
 
 
@@ -466,7 +530,7 @@ class CTFdClient:
                         f.write(chunk)
 
     def submit_flag(self, challenge_id: int, flag: str) -> Dict[str, Any]:
-        if not self.s.headers.get("CSRF-Token"):
+        if "CSRF-Token" not in self.s.headers or not self.s.headers["CSRF-Token"]:
             self._fetch_nonce()
         headers = {
             "Content-Type": "application/json",
@@ -490,7 +554,20 @@ def ensure_executable(path: Path) -> None:
     path.chmod(mode | 0o111)
 
 
+def resolve_host(hostname: str) -> Optional[str]:
+    try:
+        import socket
+        return socket.gethostbyname(hostname)
+    except Exception:
+        return None
+
+
 def run_subprocess(cmd: List[str], cwd: Path, timeout: int = 180, env: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
+    # Ensure env is a dictionary and contains necessary variables
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
+        
     proc = subprocess.run(
         cmd,
         cwd=str(cwd),
@@ -498,7 +575,7 @@ def run_subprocess(cmd: List[str], cwd: Path, timeout: int = 180, env: Optional[
         text=True,
         check=False,
         timeout=timeout,
-        env=env if env else os.environ,
+        env=run_env,
     )
     output = (proc.stdout or "") + ("\n" if proc.stdout and proc.stderr else "") + (proc.stderr or "")
     return proc.returncode, output
@@ -572,6 +649,7 @@ def generate_challenge_plan(
     runner_cmd: str,
     chdir: Path,
     timeout: int = 300,
+    walkthrough: bool = False,
 ) -> str:
     plan_prompt = (
         f"You are a CTF Planning Agent. Analyze the following challenge and files to create a high-level strategy.\n\n"
@@ -581,18 +659,23 @@ def generate_challenge_plan(
         "Your output should be a structured markdown plan. Do not write code yet. "
         "Focus on: Potential vulnerabilities, Required tools, and Execution steps."
     )
+    if walkthrough:
+        plan_prompt += "\nAdditionally, your plan MUST include a final step to document the solution in a 'walkthrough.md' file once the flag is successfully identified."
     prompt_file = chdir / "agent_rounds" / "planning_prompt.txt"
     prompt_file.write_text(plan_prompt, encoding="utf-8")
     
-    log_info(f"Generating strategy for #{chall.id} {chall.name}...")
+    log_info(f"Generating strategy for #{chall.id} {chall.name} (Timeout: {timeout}s)...")
+    # A subprocess call might take a while, this log confirms we are now waiting on the AI.
     rc, output = run_model(runner_cmd, prompt_file, chdir, timeout=timeout)
     
-    if rc != 0:
+    cleaned_plan = clean_model_output(output)
+    
+    if rc != 0 or not cleaned_plan:
         log_warn(f"Strategy generation failed for #{chall.id}. Proceeding without plan.")
         return "No plan generated."
         
-    (chdir / "plan.md").write_text(output, encoding="utf-8")
-    return output
+    (chdir / "plan.md").write_text(cleaned_plan, encoding="utf-8")
+    return cleaned_plan
 
 
 # =========================
@@ -608,6 +691,7 @@ def process_challenge(
     env_info: str = "N/A",
     enable_planning: bool = False,
     override_timeout: Optional[int] = None,
+    walkthrough: bool = False,
 ) -> Dict[str, Any]:
     route = choose_route(chall.category, config["routing"])
     if not route:
@@ -643,8 +727,23 @@ def process_challenge(
         # Planning Phase
         plan_txt = "No plan generated."
         if enable_planning:
-            plan_txt = generate_challenge_plan(chall, runner_cmd, chdir, timeout=override_timeout or config["ctf"].get("model_timeout", 300))
+            plan_txt = generate_challenge_plan(chall, runner_cmd, chdir, timeout=override_timeout or config["ctf"].get("model_timeout", 300), walkthrough=walkthrough)
             log_ok(f"Strategy formulated for #{chall.id}")
+
+        # DNS Helper logic
+        dns_hints = []
+        all_text_for_dns = f"{chall.description} {chall.connection_info or ''}"
+        potential_hosts = re.findall(r"([a-z0-9]+(?:\.[a-z0-9\-]+)+)", all_text_for_dns.lower())
+        for h in set(potential_hosts):
+            if "." in h and not h.replace(".", "").isdigit():
+                ip = resolve_host(h)
+                if ip:
+                    dns_hints.append(f"{h} -> {ip}")
+        
+        env_with_dns = env_info
+        if dns_hints:
+            log_ok(f"Resolved DNS Hints for #{chall.id}: {Fore.YELLOW}{', '.join(dns_hints)}{Style.RESET_ALL}")
+            env_with_dns += "\nResolved hostnames for your convenience: " + ", ".join(dns_hints)
 
         db.mark_status(chall.id, "running")
         last_workspace_hash = None
@@ -652,7 +751,7 @@ def process_challenge(
         solved = False
 
         max_rounds = config["ctf"].get("max_agent_rounds", 8)
-        max_idle_rounds = config["ctf"].get("max_idle_rounds", 2)
+        max_idle_rounds = config["ctf"].get("max_idle_rounds", 3)
         model_timeout = override_timeout or config["ctf"].get("model_timeout", 300)
 
         for round_no in range(1, max_rounds + 1):
@@ -666,24 +765,30 @@ def process_challenge(
             if workspace_hash == last_workspace_hash:
                 idle_rounds += 1
                 if idle_rounds >= max_idle_rounds:
-                    log_warn(f"Challenge #{chall.id} stalled. Terminating.")
+                    log_warn(f"Challenge #{chall.id} stalled (no workspace changes). Terminating.")
                     break
             else: idle_rounds = 0
             last_workspace_hash = workspace_hash
 
-            prompt = render_prompt(prompt_template, chall, chdir, round_no, workspace_text[:20000], history_text[:20000], env_info=env_info, plan=plan_txt)
+            prompt = render_prompt(prompt_template, chall, chdir, round_no, workspace_text[:20000], history_text[:20000], env_info=env_with_dns, plan=plan_txt, walkthrough_active=walkthrough)
             prompt_file = rounds_dir / f"round_{round_no:02d}.prompt.txt"
             prompt_file.write_text(prompt, encoding="utf-8")
 
             # Agent Execution
             try:
                 rc, output = run_model(runner_cmd, prompt_file, chdir, timeout=model_timeout)
+                
+                # Extract from RAW output
+                lang, code = extract_first_code_block(output)
+                run_commands = extract_run_commands(output)
+                
+                cleaned_output = clean_model_output(output)
+                
                 out_file = rounds_dir / f"round_{round_no:02d}.out.txt"
-                out_file.write_text(output, encoding="utf-8")
-                combined_text = output
+                out_file.write_text(cleaned_output, encoding="utf-8")
+                combined_text = cleaned_output
 
                 # RUN Commands
-                run_commands = extract_run_commands(output)
                 if run_commands:
                     cmd_results = run_model_commands(run_commands, chdir, timeout=config["ctf"].get("command_timeout", 90), env=exec_env)
                     db.inc_stat("commands_executed", len(cmd_results))
@@ -691,7 +796,6 @@ def process_challenge(
                     (rounds_dir / f"round_{round_no:02d}.commands.txt").write_text("\n\n".join([f"$ {r[0]}\n{r[2]}" for r in cmd_results]))
 
                 # Artifact Execution
-                lang, code = extract_first_code_block(output)
                 if code:
                     artifact_path = save_generated_artifact(chdir, round_no, lang or "", code)
                     exec_rc, exec_output = run_generated_artifact(artifact_path, timeout=config["ctf"].get("artifact_timeout", 240), env=exec_env)
@@ -713,6 +817,7 @@ def process_challenge(
                     
                     msg_text = json.dumps(resp).lower()
                     if resp.get("success") is True and not any(bad in msg_text for bad in ["incorrect", "wrong"]):
+                        _p(BANNER_CORRECT)
                         log_ok(f"SOLVED: #{chall.id} {chall.name} Flag: {flag}")
                         db.mark_solved(chall.id, flag, resp)
                         solved = True
@@ -747,6 +852,7 @@ def main() -> int:
     parser.add_argument("--venv", help="Path to python virtual environment")
     parser.add_argument("--plan", action="store_true", help="Enable strategic planning phase")
     parser.add_argument("--timeout", type=int, help="Override default model timeout (seconds)")
+    parser.add_argument("--walkthrough", action="store_true", help="Request agent to write walkthrough.md upon success")
     args = parser.parse_args()
 
     root = Path(".").resolve()
@@ -781,6 +887,7 @@ def main() -> int:
     client = CTFdClient(config["ctf"]["base_url"], session)
     db.inc_stat("runs", 1)
 
+    _p(SPLASH)
     log_step(f"Initialization complete for {config['ctf'].get('name', 'Competition')}")
     
     try:
@@ -827,7 +934,7 @@ def main() -> int:
 
     with futures.ThreadPoolExecutor(max_workers=workers) as executor:
         fmap = {
-            executor.submit(process_challenge, chall, config, db, client, root, exec_env, env_info, args.plan, args.timeout): chall
+            executor.submit(process_challenge, chall, config, db, client, root, exec_env, env_info, args.plan, args.timeout, args.walkthrough): chall
             for chall in eligible
         }
         for fut in futures.as_completed(fmap):

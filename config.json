@@ -10,7 +10,7 @@
     ],
     "auto_submit": true,
     "max_agent_rounds": 8,
-    "max_idle_rounds": 2,
+    "max_idle_rounds": 3,
     "model_timeout": 300,
     "artifact_timeout": 240,
     "command_timeout": 90,
@@ -27,12 +27,29 @@
     "crypto": "codex",
     "cryptography": "codex",
     "pwn": "codex",
-    "binary exploitation": "codex"
+    "binary exploitation": "codex",
+    "reverse": "codex",
+    "rev": "codex",
+    "reverse engineering": "codex",
+    "mobile": "codex",
+    "android": "codex",
+    "misc": "gemini",
+    "miscellaneous": "gemini",
+    "forensics": "gemini",
+    "dfir": "gemini"
   },
   "models": {
     "gemini": {
       "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
       "prompt_template": "prompts/web.txt"
+    },
+    "gemini_misc": {
+      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
+      "prompt_template": "prompts/misc.txt"
+    },
+    "gemini_forensics": {
+      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
+      "prompt_template": "prompts/forensics.txt"
     },
     "codex_crypto": {
       "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
@@ -41,6 +58,14 @@
     "codex_pwn": {
       "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
       "prompt_template": "prompts/pwn.txt"
+    },
+    "codex_rev": {
+      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "prompt_template": "prompts/rev.txt"
+    },
+    "codex_mobile": {
+      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "prompt_template": "prompts/mobile.txt"
     }
   },
   "workspace": {

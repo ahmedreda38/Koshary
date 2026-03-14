@@ -17,5 +17,7 @@ if ! command -v gemini >/dev/null 2>&1; then
   exit 127
 fi
 
-# Use --yolo and --prompt for non-interactive execution
-gemini --yolo --prompt "$(cat "$prompt_file")"
+# Pass the prompt via stdin using the '-' argument (standard for many CLIs)
+# or just pipe it in if the CLI supports it. 
+# For gemini-cli, --prompt with '-' usually reads from stdin.
+cat "$prompt_file" | gemini --yolo --prompt -
