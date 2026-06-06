@@ -1,0 +1,42 @@
+{
+  "challenges": [
+    {
+      "id": "web-123",
+      "name": "Example Web",
+      "category": "Web",
+      "points": 325,
+      "description": "A vulnerable web app.",
+      "solved": false,
+      "files": [{"url": "https://cdn.htb.example/source.zip", "name": "source.zip"}],
+      "docker": true
+    },
+    {
+      "id": "pwn-7",
+      "name": "Stack Smash",
+      "category": "Pwn",
+      "points": 500,
+      "description": "Classic overflow.",
+      "solved": false,
+      "files": [],
+      "docker": true
+    },
+    {
+      "id": "fp-1",
+      "name": "Haunted",
+      "category": "Fullpwn",
+      "points": 0,
+      "description": "Own user and root.",
+      "solved": false,
+      "files": []
+    },
+    {
+      "id": "crypto-9",
+      "name": "Weak RSA",
+      "category": "Crypto",
+      "points": 200,
+      "description": "Tiny modulus.",
+      "solved": true,
+      "files": [{"url": "https://cdn.htb.example/chal.txt", "name": "chal.txt"}]
+    }
+  ]
+}

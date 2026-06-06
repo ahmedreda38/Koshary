@@ -1,0 +1,10 @@
+{
+  "id": "pwn-7",
+  "name": "Stack Smash",
+  "category": "Pwn",
+  "points": 500,
+  "description": "Classic overflow.",
+  "solved": false,
+  "files": [],
+  "docker": true
+}

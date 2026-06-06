@@ -8,14 +8,29 @@
 |_|\_\___/|____/|_| |_/_/   \_\_| \_\|_|
 ```
 
-Autonomous CTFd solver framework for running Gemini, Codex, and optionally Claude through category-specific prompts, challenge workspaces, and parallel orchestration.
+Autonomous **multi-platform** CTF solver framework for running Gemini, Codex, and optionally Claude through category-specific prompts, challenge workspaces, and parallel orchestration.
+
+Koshary now supports two platforms behind a common adapter interface:
+
+1. **CTFd** — classic CTFd-hosted competitions (cookie-based).
+2. **Hack The Box CTF** — via HTB's official **CTF MCP** server (token-based), including Docker instance spawning and Fullpwn machines.
+
+The orchestrator never talks to a platform directly. It only receives a
+`NormalizedChallenge`, local files, target info, and a `submit_flag()` method, so
+adding more platforms later is straightforward.
+
+```text
+Koshary Core
+├── platforms/ctfd.py          (CTFd adapter)
+└── platforms/htb_ctf_mcp.py   (HTB CTF MCP adapter)
+```
 
 ## Overview
 
 Koshary is built around one main loop:
 
-1. Set competition metadata and routing with `setup_ctf.py`
-2. Start the solver with `orchestrator.py`
+1. Set competition metadata and routing with `setup_ctf.py` (CTFd) or `setup_htb.py` (HTB)
+2. Start the solver with `orchestrator.py --platform ctfd|htb_ctf`
 3. Inspect per-challenge workspaces under `challenges/`
 4. Reset the framework safely with `clean_workspace.py`
 
@@ -59,6 +74,9 @@ sequenceDiagram
 
 | Capability | What it does |
 | --- | --- |
+| Multi-platform | CTFd and Hack The Box CTF (official MCP) behind one adapter interface |
+| HTB instances | Spawns/stops Docker instances, waits for reachability, handles Fullpwn machines |
+| Secret redaction | `HTB_MCP_TOKEN`, session cookies, and Authorization headers are never logged |
 | Startup model check | Detects `gemini`, `codex`, and `claude` before execution |
 | Category routing | Maps challenge categories to model families through `config.json` |
 | Alias-aware filters | `pwn` matches `Binary Exploitation`, `dfir` matches `Forensics`, etc. |
@@ -71,28 +89,44 @@ sequenceDiagram
 ## Project Layout
 
 ```text
-CTF-AI/
-├── orchestrator.py          Main solver and CTFd client
-├── setup_ctf.py            Competition setup helper
-├── clean_workspace.py      Workspace reset and secret scrubbing
-├── first_blood.py          Early-flag polling utility
-├── config.json             Routing, prompts, timeouts, workspace settings
-├── .env                    CTFd session cookie
-├── prompts/                Prompt templates by category
-├── runners/                CLI wrappers for Gemini/Codex
-├── challenges/             Per-challenge working directories
-└── state/                  Persistent DB, logs, stats
+Koshary/
+├── orchestrator.py          Platform-agnostic solver loop + CLI
+├── setup_ctf.py             CTFd setup helper
+├── setup_htb.py             HTB CTF setup helper (MCP)
+├── clean_workspace.py       Workspace reset and secret scrubbing
+├── first_blood.py           Early-flag polling utility (CTFd)
+├── config.json              platform, routing, htb block, models, workspace
+├── .env                     CTFD_SESSION and/or HTB_MCP_TOKEN
+├── platforms/               Platform adapters
+│   ├── base.py              NormalizedChallenge, SubmitResult, BasePlatform
+│   ├── ctfd.py              CTFd client + CTFdPlatform
+│   └── htb_ctf_mcp.py       HTBCTFPlatform (tool discovery)
+├── core/                    Platform-independent helpers
+│   ├── mcp_client.py        MCP streamable-HTTP client (token redaction)
+│   ├── flag_extractor.py    flag + non-standard candidate extraction
+│   ├── downloads.py         download + archive extraction
+│   ├── instance_manager.py  HTB instance lifecycle + reachability
+│   └── logging_utils.py     redaction + structured stream loggers
+├── prompts/                 Prompt templates (incl. htb_system.md, fullpwn.md)
+├── runners/                 CLI wrappers for Gemini/Codex/Claude
+├── tests/                   Unit tests + mocked HTB MCP fixtures
+├── challenges/              Per-challenge working directories
+├── logs/                    Structured logs (htb_mcp.log, ...)
+└── state/                   Persistent DB, stats
 ```
 
 Inside each challenge workspace:
 
 ```text
-challenges/<id>-<slug>/
+# CTFd:  challenges/<id>-<slug>/
+# HTB:   challenges/<event>/<category>/<slug>/
 ├── challenge.json
+├── target.json          (HTB target host/port/url + vpn_required)
+├── instance.json        (HTB instance status, if spawned)
 ├── plan.md
-├── submitted.json
+├── submitted.json       ({"attempts": [...], "solved": bool})
 ├── walkthrough.md
-├── files/
+├── files/               (+ ../extracted/ for archives)
 └── agent_rounds/
     ├── planning_prompt.txt
     ├── round_01.prompt.txt
@@ -329,6 +363,128 @@ python3 orchestrator.py \
   --categories "web"
 ```
 
+## HTB CTF Mode (Hack The Box)
+
+Koshary can solve Hack The Box CTF events through HTB's official **CTF MCP**
+server. Instance spawning (Docker) and Fullpwn machines are handled by the
+framework; the AI models only ever solve inside scoped per-challenge workspaces.
+
+### 1. Provide your HTB MCP token
+
+Add it to `.env` (never logged — it is redacted everywhere):
+
+```bash
+HTB_MCP_TOKEN="paste_token_here"
+```
+
+or let the setup helper write it:
+
+```bash
+python3 setup_htb.py --token 'paste_token_here' --check-token
+```
+
+### 2. Configure an event
+
+```bash
+python3 setup_htb.py --list-events
+python3 setup_htb.py --interactive
+# or non-interactively:
+python3 setup_htb.py --event cyber-apocalypse-2026 \
+  --models 'web:C,crypto:C,pwn:C,rev:C,forensics:G,misc:G,fullpwn:C'
+```
+
+This sets `platform = "htb_ctf"`, writes `htb.event`, and adds the
+`HTB{...}` / `CHTB{...}` flag patterns to `config.json`. `htb.event` accepts
+either the numeric event id or the slug (e.g. `cyber-apocalypse-2026-1234`);
+Koshary resolves the slug to the numeric `ctf_id` automatically.
+
+### 2b. Join the event (required before challenges are visible)
+
+HTB returns `403` for an event's challenges until your team has joined it.
+Joining is a state-changing action, so it is explicit:
+
+```bash
+python3 setup_htb.py --event cyber-apocalypse-2026 --join          # uses your first team
+python3 setup_htb.py --event cyber-apocalypse-2026 --join \
+  --team-id 316647 --ctf-password 'optional-event-password'
+```
+
+Set `htb.auto_join: true` (and optionally `htb.team_id`) to join during setup
+automatically.
+
+### 3. List, sync, and solve
+
+```bash
+# List challenges for the event
+python3 orchestrator.py --platform htb_ctf --event cyber-apocalypse-2026 --list-challenges
+
+# Create local workspaces (and download attachments) without solving
+python3 orchestrator.py --platform htb_ctf --event cyber-apocalypse-2026 --sync-only --download
+
+# Solve only web (planning on, submission off for early testing)
+python3 orchestrator.py \
+  --platform htb_ctf \
+  --event cyber-apocalypse-2026 \
+  --categories web \
+  --parallel 2 --plan --walkthrough --no-submit
+
+# Fullpwn (serial by default; assumes your HTB VPN is connected)
+python3 orchestrator.py \
+  --platform htb_ctf --categories fullpwn \
+  --parallel 1 --plan --walkthrough --venv ~/CTF-env
+```
+
+### HTB configuration (`config.json` → `htb`)
+
+```json
+{
+  "platform": "htb_ctf",
+  "htb": {
+    "mcp_url": "https://mcp.hackthebox.ai/v1/ctf/mcp/",
+    "event": "cyber-apocalypse-2026",
+    "auto_start_instances": true,
+    "auto_stop_on_solve": false,
+    "download_password": "hackthebox",
+    "max_wrong_submissions_per_challenge": 3,
+    "allow_nonstandard_flags": false,
+    "assume_vpn_connected": false,
+    "tools": {}
+  }
+}
+```
+
+`tools` lets you pin exact MCP tool names per role (e.g.
+`{"submit_flag": "submit_ctf_flag"}`) if HTB's auto-discovered names ever change;
+otherwise Koshary discovers and matches them at runtime.
+
+### HTB-specific orchestrator flags
+
+| Flag | Effect |
+| --- | --- |
+| `--platform htb_ctf` | Select the HTB adapter (or set `platform` in config) |
+| `--event SLUG` | Override `htb.event` |
+| `--list-events` | List HTB events and exit |
+| `--list-challenges` / `--sync-only` | Create local workspaces, then exit |
+| `--download` | Download + extract attachments during sync |
+| `--start-only` | Sync + spawn instances, then exit |
+| `--no-auto-start` | Do not spawn Docker instances |
+| `--auto-stop` | Stop the instance after a solve |
+| `--no-submit` | Detect flags but never submit |
+| `--manual-submit` | Print candidate flags instead of submitting |
+| `--max-wrong N` | Cap wrong submissions per challenge (`0` = unlimited) |
+| `--allow-nonstandard-flags` | Submit `FINAL_ANSWER_CANDIDATE` values (CVE, password, ...) |
+| `--scoreboard` | Print the event scoreboard and exit |
+| `--strategy` | Print a ranked solve queue and exit |
+
+### Tests
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py"
+```
+
+All HTB tests use mocked MCP fixtures under `tests/fixtures/htb/` — no network
+and no real token are required.
+
 ## `first_blood.py`
 
 This utility watches the CTFd API and tries to solve obvious intro or sanity-check challenges early.
@@ -383,6 +539,19 @@ python3 clean_workspace.py --dry-run
 ```bash
 python3 clean_workspace.py --keep-prompts --keep-runners --yes
 ```
+
+### HTB-aware cleanup
+
+```bash
+# Stop any tracked HTB instances (via MCP) before deleting state
+python3 clean_workspace.py --stop-running-instances --yes
+
+# Keep the HTB token value when scrubbing .env
+python3 clean_workspace.py --keep-htb-token --yes
+```
+
+HTB cleanup also empties `htb.event` and the `HTB_MCP_TOKEN` value (key kept)
+while preserving routing and HTB connection settings.
 
 ## Audit Notes
 

@@ -1,4 +1,32 @@
 {
+  "platform": "htb_ctf",
+  "htb": {
+    "mcp_url": "https://mcp.hackthebox.ai/v1/ctf/mcp/",
+    "event": "2578",
+    "auto_join": false,
+    "auto_start_instances": true,
+    "auto_stop_on_solve": false,
+    "download_password": "hackthebox",
+    "max_wrong_submissions_per_challenge": 3,
+    "allow_nonstandard_flags": false,
+    "assume_vpn_connected": false,
+    "team_id": 316647,
+    "tools": {
+      "list_events": "list_ctf_events",
+      "get_event": "retrieve_ctf",
+      "list_challenges": "retrieve_ctf",
+      "get_challenge": "retrieve_ctf",
+      "download": "get_download_link",
+      "start_instance": "start_container",
+      "stop_instance": "stop_container",
+      "instance_status": "container_status",
+      "submit_flag": "submit_flag",
+      "scoreboard": "retrieve_ctf_scores",
+      "solves": "retrieve_ctf_solves",
+      "join_event": "join_ctf_event",
+      "my_teams": "retrieve_my_teams"
+    }
+  },
   "ctf": {
     "name": "Utctf",
     "base_url": "https://utctf.live",
@@ -7,7 +35,9 @@
       "CyCTF\\{[^\\s]+\\}",
       "cyctf\\{[^\\s]+\\}",
       "flag\\{[^\\s]+\\}",
-      "CTF\\{[^\\s]+\\}"
+      "CTF\\{[^\\s]+\\}",
+      "(?<![A-Za-z])HTB\\{[^}\\n\\r]{1,300}\\}",
+      "(?<![A-Za-z])CHTB\\{[^}\\n\\r]{1,300}\\}"
     ],
     "auto_submit": true,
     "max_agent_rounds": 8,
@@ -25,48 +55,61 @@
   "routing": {
     "web": "gemini",
     "web exploitation": "gemini",
-    "crypto": "gemini",
-    "cryptography": "gemini",
-    "pwn": "gemini",
-    "binary exploitation": "gemini",
-    "reverse": "gemini",
-    "rev": "gemini",
-    "reverse engineering": "gemini",
+    "crypto": "claude",
+    "cryptography": "claude",
+    "pwn": "codex",
+    "binary exploitation": "codex",
+    "reverse": "claude",
+    "rev": "claude",
+    "reverse engineering": "claude",
     "mobile": "gemini",
     "android": "gemini",
-    "misc": "gemini",
-    "miscellaneous": "gemini",
+    "misc": "claude",
+    "miscellaneous": "claude",
     "forensics": "gemini",
-    "dfir": "gemini"
+    "dfir": "gemini",
+    "fullpwn": "codex",
+    "full-pwn": "codex",
+    "machine": "codex",
+    "hardware": "codex",
+    "blockchain": "claude"
   },
   "models": {
     "gemini": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
+      "runner": "bash runners/run_gemini.sh",
       "prompt_template": "prompts/web.txt"
     },
     "gemini_misc": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
+      "runner": "bash runners/run_gemini.sh",
       "prompt_template": "prompts/misc.txt"
     },
     "gemini_forensics": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_gemini.sh",
+      "runner": "bash runners/run_gemini.sh",
       "prompt_template": "prompts/forensics.txt"
     },
     "codex_crypto": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "runner": "bash runners/run_codex.sh",
       "prompt_template": "prompts/crypto.txt"
     },
     "codex_pwn": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "runner": "bash runners/run_codex.sh",
       "prompt_template": "prompts/pwn.txt"
     },
     "codex_rev": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "runner": "bash runners/run_codex.sh",
       "prompt_template": "prompts/rev.txt"
     },
     "codex_mobile": {
-      "runner": "bash /home/kali/Desktop/researchs/CTF-AI/runners/run_codex.sh",
+      "runner": "bash runners/run_codex.sh",
       "prompt_template": "prompts/mobile.txt"
+    },
+    "codex_fullpwn": {
+      "runner": "bash runners/run_codex.sh",
+      "prompt_template": "prompts/pwn.txt"
+    },
+    "claude": {
+      "runner": "bash runners/run_claude.sh",
+      "prompt_template": "prompts/misc.txt"
     }
   },
   "workspace": {

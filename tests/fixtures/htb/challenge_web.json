@@ -1,0 +1,10 @@
+{
+  "id": "web-123",
+  "name": "Example Web",
+  "category": "Web",
+  "points": 325,
+  "description": "A vulnerable web app. Find the flag.",
+  "solved": false,
+  "files": [{"url": "https://cdn.htb.example/source.zip", "name": "source.zip"}],
+  "docker": true
+}

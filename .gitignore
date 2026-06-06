@@ -10,7 +10,9 @@ venv/
 # Project specific
 challenges/
 state/
+logs/
 __pycache__/
+.pytest_cache/
 *.log
 .lock
 
