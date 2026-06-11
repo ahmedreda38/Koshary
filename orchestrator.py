@@ -400,12 +400,17 @@ def collect_history_text(chdir: Path, current_round: int) -> str:
 def build_htb_context(root: Path, chall: Challenge) -> str:
     """Assemble the HTB system prompt + target context prepended to every
     HTB solver round (Phase 7 of the integration plan)."""
-    if chall.platform != "htb_ctf":
+    if chall.platform not in ("htb_ctf", "htb_cookie"):
         return ""
     parts: List[str] = []
-    sys_path = root / "prompts" / "htb_system.md"
-    if sys_path.exists():
-        parts.append(sys_path.read_text(encoding="utf-8").strip())
+    sys_candidates: List[Path] = []
+    if chall.platform == "htb_cookie":
+        sys_candidates.append(root / "prompts" / "htb_cookie_system.md")
+    sys_candidates.append(root / "prompts" / "htb_system.md")
+    for sys_path in sys_candidates:
+        if sys_path.exists():
+            parts.append(sys_path.read_text(encoding="utf-8").strip())
+            break
     if "fullpwn" in (chall.category or "").lower() or chall.target_kind == "fullpwn":
         fp_path = root / "prompts" / "fullpwn.md"
         if fp_path.exists():
@@ -709,10 +714,15 @@ def generate_challenge_plan(
 def challenge_workspace(root: Path, config: Dict[str, Any], chall: Challenge) -> Path:
     """Per-challenge workspace path (platform-aware).
 
-    CTFd:  challenges/<id>-<slug>/
-    HTB:   challenges/<event>/<category>/<slug>/
+    CTFd:        challenges/<id>-<slug>/
+    HTB MCP:     challenges/<event>/<category>/<slug>/
+    HTB cookie:  challenges/htb_cookie/<ctf_id>/<category>/<id>_<slug>/
     """
     base = root / config["workspace"]["root"]
+    if chall.platform == "htb_cookie":
+        return (base / "htb_cookie" / slugify(chall.event_id or "event")
+                / slugify(chall.category or "misc")
+                / f"{chall.challenge_id}_{chall.slug}")
     if chall.platform == "htb_ctf":
         return base / slugify(chall.event_id or "event") / slugify(chall.category or "misc") / chall.slug
     return base / f"{chall.challenge_id}-{slugify(chall.name)}"
@@ -984,8 +994,14 @@ def _solve_with_candidates(chall: Challenge, candidates: List[str], platform: Ba
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Koshary multi-platform CTF orchestrator")
     # Platform selection
-    parser.add_argument("--platform", choices=["ctfd", "htb_ctf"], help="Source platform (default: config.platform or ctfd)")
-    parser.add_argument("--event", help="HTB event id/slug (overrides config.htb.event)")
+    parser.add_argument("--platform", choices=["ctfd", "htb_ctf", "htb_cookie"], help="Source platform (default: config.platform or ctfd)")
+    parser.add_argument("--event", help="HTB MCP event id/slug (overrides config.htb.event)")
+    # HTB cookie/bearer mode
+    parser.add_argument("--ctf-id", type=int, help="HTB cookie-mode CTF event id (overrides config.htb_cookie.ctf_id)")
+    parser.add_argument("--headers-file", help="HTB cookie-mode: raw request file holding Cookie/Authorization")
+    parser.add_argument("--challenge-id", help="Operate on a single challenge id (start/stop/submit/solve)")
+    parser.add_argument("--submit-candidate", help="Submit this flag for --challenge-id, then exit")
+    parser.add_argument("--stop-instance", action="store_true", help="Stop the instance for --challenge-id, then exit")
     # CTFd
     parser.add_argument("--url", help="CTFd base URL")
     parser.add_argument("--session", help="CTFd session cookie")
@@ -1005,6 +1021,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Instance control
     parser.add_argument("--no-auto-start", action="store_true", help="Do not auto-start HTB instances")
     parser.add_argument("--auto-stop", action="store_true", help="Stop HTB instance after a solve")
+    parser.add_argument("--stop-on-solve", action="store_true", help="Alias for --auto-stop")
     parser.add_argument("--start-only", action="store_true", help="Sync + start instances, then exit")
     # Read-only / utility modes
     parser.add_argument("--list-events", action="store_true", help="List HTB events and exit")
@@ -1066,12 +1083,17 @@ def main() -> int:
     platform_name = (args.platform or config.get("platform") or "ctfd").lower()
     config["platform"] = platform_name
     config.setdefault("htb", {})
+    config.setdefault("htb_cookie", {})
 
     # CLI Overrides
     if args.url:
         config["ctf"]["base_url"] = args.url.rstrip("/")
     if args.event:
         config["htb"]["event"] = args.event
+    if args.ctf_id:
+        config["htb_cookie"]["ctf_id"] = args.ctf_id
+    if args.headers_file:
+        config["htb_cookie"]["headers_file"] = args.headers_file
     if args.categories:
         config["ctf"]["include_categories"] = [c.strip().lower() for c in args.categories.split(",")]
     if args.parallel:
@@ -1080,7 +1102,7 @@ def main() -> int:
         config["ctf"]["flag_patterns"].insert(0, args.flag_format)
 
     # HTB always recognises HTB{...}/CHTB{...}
-    if platform_name == "htb_ctf":
+    if platform_name in ("htb_ctf", "htb_cookie"):
         from core.flag_extractor import HTB_DEFAULT_PATTERNS
         for pat in HTB_DEFAULT_PATTERNS:
             if pat not in config["ctf"]["flag_patterns"]:
@@ -1112,6 +1134,27 @@ def main() -> int:
                 log_err("Authentication failure: Missing CTFD_SESSION.")
                 return 1
             platform = get_platform("ctfd", config, session=session)
+        elif platform_name == "htb_cookie":
+            cookie = os.getenv("HTB_CTF_COOKIE", "").strip()
+            bearer = os.getenv("HTB_CTF_BEARER", "").strip()
+            headers_file = config["htb_cookie"].get("headers_file")
+            if not cookie and not bearer and not headers_file:
+                log_err("Authentication failure: set HTB_CTF_COOKIE / HTB_CTF_BEARER in .env "
+                        "or pass --headers-file.")
+                return 1
+            register_secret(cookie)
+            register_secret(bearer)
+            platform = get_platform("htb_cookie", config)
+            # Best-effort access validation via the menu endpoint.
+            try:
+                can_view, menu = platform.client.validate_access()  # type: ignore[attr-defined]
+                if can_view:
+                    log_ok(f"Access validated: {menu.get('name', 'event')} [{menu.get('status', '?')}]")
+                else:
+                    log_warn("Session cannot view challenges (userCanViewChallenges=false). "
+                             "Make sure you've joined this event in the browser.")
+            except Exception as e:  # noqa: BLE001
+                log_warn(f"Access validation skipped: {redact(str(e))}")
         else:
             token = os.getenv("HTB_MCP_TOKEN", "").strip()
             if not token:
@@ -1123,8 +1166,51 @@ def main() -> int:
         log_err(f"Platform initialization failed: {redact(str(e))}")
         return 1
 
-    label = config.get("htb", {}).get("event") if platform_name == "htb_ctf" else config["ctf"].get("name")
+    if platform_name == "htb_ctf":
+        label = config.get("htb", {}).get("event")
+    elif platform_name == "htb_cookie":
+        label = config.get("htb_cookie", {}).get("ctf_id")
+    else:
+        label = config["ctf"].get("name")
     log_step(f"Platform: {platform_name} :: {label or 'Competition'}")
+
+    # ------------------------------------------------------------------ #
+    # Single-challenge utility actions (stop / submit one challenge, then exit)
+    # ------------------------------------------------------------------ #
+    if args.stop_instance or args.submit_candidate:
+        if not args.challenge_id:
+            log_err("--stop-instance / --submit-candidate require --challenge-id.")
+            return 1
+        try:
+            chall = platform.get_challenge(str(args.challenge_id))
+        except Exception as e:  # noqa: BLE001
+            log_err(f"Could not load challenge {args.challenge_id}: {redact(str(e))}")
+            return 1
+        if args.stop_instance:
+            try:
+                platform.stop_instance(chall)
+                log_ok(f"Stop requested for #{chall.challenge_id} {chall.name}")
+            except Exception as e:  # noqa: BLE001
+                log_err(f"Stop failed: {redact(str(e))}")
+                return 1
+            return 0
+        # --submit-candidate
+        chdir = challenge_workspace(root, config, chall)
+        ensure_dirs(chdir)
+        try:
+            result = platform.submit_flag(chall, args.submit_candidate)
+        except Exception as e:  # noqa: BLE001
+            log_err(f"Submission error: {redact(str(e))}")
+            return 1
+        record_submission(chdir, args.submit_candidate, result.accepted, result.message)
+        if result.accepted:
+            _p(BANNER_CORRECT)
+            log_ok(f"SOLVED: #{chall.challenge_id} {chall.name}")
+            db.mark_solved(chall.challenge_id, args.submit_candidate, result.raw)
+            return 0
+        log_warn(f"Submission rejected for #{chall.challenge_id}: {redact(result.message)}")
+        db.mark_attempt(chall.challenge_id, args.submit_candidate, result.raw)
+        return 2
 
     # ------------------------------------------------------------------ #
     # Read-only / utility modes (early exit)
@@ -1216,6 +1302,18 @@ def main() -> int:
                f" / {'has files' if c.files else 'no files'}  (score={score:.0f})")
         return 0
 
+    # Explicit single-challenge selection bypasses category/solved filtering.
+    if args.challenge_id:
+        match = next((c for c in challenges if str(c.challenge_id) == str(args.challenge_id)), None)
+        if not match:
+            log_err(f"Challenge {args.challenge_id} not found in this event.")
+            return 1
+        try:
+            match = platform.get_challenge(str(args.challenge_id))
+        except Exception:  # noqa: BLE001
+            pass
+        eligible = [match]
+
     if not eligible:
         log_warn("No pending challenges matched the inclusion criteria.")
         return 0
@@ -1240,16 +1338,16 @@ def main() -> int:
     # Solve
     # ------------------------------------------------------------------ #
     submit_mode = resolve_submit_mode(args, platform_name, config)
-    htb_cfg = config.get("htb", {})
-    auto_start = (not args.no_auto_start) and htb_cfg.get("auto_start_instances", True)
-    auto_stop = args.auto_stop or htb_cfg.get("auto_stop_on_solve", False)
+    pcfg = config.get("htb_cookie", {}) if platform_name == "htb_cookie" else config.get("htb", {})
+    auto_start = (not args.no_auto_start) and pcfg.get("auto_start_instances", True)
+    auto_stop = args.auto_stop or args.stop_on_solve or pcfg.get("auto_stop_on_solve", False)
     if args.max_wrong is not None:
         max_wrong = args.max_wrong
-    elif platform_name == "htb_ctf":
-        max_wrong = htb_cfg.get("max_wrong_submissions_per_challenge", 3)
+    elif platform_name in ("htb_ctf", "htb_cookie"):
+        max_wrong = pcfg.get("max_wrong_submissions_per_challenge", 3)
     else:
         max_wrong = 0  # CTFd: unlimited, preserving original behaviour
-    allow_nonstandard = args.allow_nonstandard_flags or htb_cfg.get("allow_nonstandard_flags", False)
+    allow_nonstandard = args.allow_nonstandard_flags or pcfg.get("allow_nonstandard_flags", False)
 
     workers = max(1, int(config["ctf"].get("parallel_workers", 3)))
     if any(c.target_kind == "fullpwn" for c in eligible) and not args.parallel:

@@ -27,6 +27,19 @@
       "my_teams": "retrieve_my_teams"
     }
   },
+  "htb_cookie": {
+    "base_url": "https://ctf.hackthebox.com",
+    "ctf_id": 1434,
+    "auth_mode": "cookie_bearer",
+    "auto_start_instances": true,
+    "auto_stop_on_solve": false,
+    "auto_start_fullpwn": false,
+    "download_password": "hackthebox",
+    "max_wrong_submissions_per_challenge": 3,
+    "allow_nonstandard_flags": false,
+    "poll_seconds": 60,
+    "poll_interval": 2
+  },
   "ctf": {
     "name": "Utctf",
     "base_url": "https://utctf.live",

@@ -129,7 +129,8 @@ def prepare_target(platform, challenge: NormalizedChallenge, workspace: Path,
         write_target(challenge, workspace, started_by_koshary=False)
         return challenge
 
-    htb_cfg = config.get("htb", {})
+    cfg_key = "htb_cookie" if challenge.platform == "htb_cookie" else "htb"
+    htb_cfg = config.get(cfg_key, {})
 
     if challenge.vpn_required and not htb_cfg.get("assume_vpn_connected", False):
         if logger:

@@ -17,7 +17,15 @@ if ! command -v gemini >/dev/null 2>&1; then
   exit 127
 fi
 
-# Pass the prompt via stdin using the '-' argument (standard for many CLIs)
-# or just pipe it in if the CLI supports it. 
-# For gemini-cli, --prompt with '-' usually reads from stdin.
-cat "$prompt_file" | gemini --yolo --prompt -
+# 1. Attempt execution with the high-reasoning Pro model first
+echo "[runner] Initializing with gemini-3.1-pro-preview..." >&2
+if ! cat "$prompt_file" | gemini --approval-mode=yolo --model gemini-3.1-pro-preview --prompt -; then
+  
+  # 2. If the command above fails (e.g. 429 Quota Exhausted), catch it and switch to Flash
+  echo >&2
+  echo "[runner] ⚠️ gemini-3.1-pro-preview failed or quota dead." >&2
+  echo "[runner] 🔄 Switching automatically to gemini-3.5-flash..." >&2
+  echo >&2
+  
+  cat "$prompt_file" | gemini --approval-mode=yolo --model gemini-3.5-flash --prompt -
+fi

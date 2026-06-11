@@ -1,0 +1,14 @@
+{
+  "id": 1434,
+  "name": "CTF Try Out",
+  "ends_at": "2026-12-31T00:00:00.000000Z",
+  "hasVpn": false,
+  "hasPwnbox": true,
+  "userIsHost": false,
+  "userCanViewAnalytics": true,
+  "userCanViewChallenges": true,
+  "userCanViewScoreboard": true,
+  "isBusiness": false,
+  "isUni": false,
+  "status": "running"
+}

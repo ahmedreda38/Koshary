@@ -4,6 +4,12 @@
 env/
 venv/
 
+# Captured HTB session material (cookies/bearer) — never commit
+htb_requests
+htb_headers.txt
+*.headers
+burp_*.xml
+
 # Github token
 .token
 

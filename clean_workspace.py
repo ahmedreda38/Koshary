@@ -46,6 +46,10 @@ def scrub_config(path: Path, dry_run: bool = False) -> None:
     htb_cfg = config.get("htb")
     if isinstance(htb_cfg, dict):
         htb_cfg["event"] = ""
+    htb_cookie_cfg = config.get("htb_cookie")
+    if isinstance(htb_cookie_cfg, dict):
+        htb_cookie_cfg["ctf_id"] = 0
+        htb_cookie_cfg.pop("headers_file", None)
 
     if dry_run:
         print(f"[dry-run] would scrub config fields in: {path}")
@@ -67,6 +71,8 @@ def scrub_env(path: Path, dry_run: bool = False, keep_htb_token: bool = False,
         scrub_keys.append("CTFD_SESSION")
     if not keep_htb_token:
         scrub_keys.append("HTB_MCP_TOKEN")
+        # Browser session material for htb_cookie mode.
+        scrub_keys.extend(["HTB_CTF_COOKIE", "HTB_CTF_BEARER", "HTB_CTF_USER_AGENT"])
 
     lines = path.read_text(encoding="utf-8").splitlines()
     seen = set()
@@ -113,7 +119,7 @@ def stop_running_instances(root: Path, dry_run: bool = False) -> None:
 
     running = []
     for cid, info in state.get("challenges", {}).items():
-        if info.get("platform") == "htb_ctf" and info.get("target_kind") in ("docker", "fullpwn"):
+        if info.get("platform") in ("htb_ctf", "htb_cookie") and info.get("target_kind") in ("docker", "fullpwn"):
             running.append((cid, info))
     if not running:
         print("[skip] no HTB instances tracked in state")
@@ -123,38 +129,44 @@ def stop_running_instances(root: Path, dry_run: bool = False) -> None:
         print(f"[dry-run] would stop {len(running)} HTB instance(s)")
         return
 
-    # Load .env so HTB_MCP_TOKEN is available.
+    # Load .env so HTB credentials (MCP token / cookie / bearer) are available.
     env_path = root / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("HTB_MCP_TOKEN=") and "=" in line:
-                os.environ.setdefault("HTB_MCP_TOKEN", line.split("=", 1)[1].strip().strip("'\""))
+            for key in ("HTB_MCP_TOKEN", "HTB_CTF_COOKIE", "HTB_CTF_BEARER", "HTB_CTF_USER_AGENT"):
+                if line.startswith(f"{key}=") and "=" in line:
+                    os.environ.setdefault(key, line.split("=", 1)[1].strip().strip("'\""))
 
-    try:
-        from platforms.htb_ctf_mcp import HTBCTFPlatform
-        from platforms.base import NormalizedChallenge
+    from platforms import get_platform
+    from platforms.base import NormalizedChallenge
 
-        platform = HTBCTFPlatform(config)
-        for cid, info in running:
-            try:
-                chall = NormalizedChallenge(
-                    platform="htb_ctf", event_id=info.get("event_id", ""),
-                    challenge_id=str(cid), name=info.get("name", ""),
-                    category=info.get("category", ""), points=info.get("value"),
-                    description="", target_kind=info.get("target_kind", "docker"),
-                )
-                platform.stop_instance(chall)
-                print(f"[ok] stop requested for instance {cid}")
-            except Exception as exc:
-                print(f"[warn] could not stop instance {cid}: {exc}")
-    except Exception as exc:
-        print(f"[warn] HTB platform unavailable for instance teardown: {exc}")
+    platforms_cache: dict = {}
+
+    def _platform_for(name: str):
+        if name not in platforms_cache:
+            platforms_cache[name] = get_platform(name, config)
+        return platforms_cache[name]
+
+    for cid, info in running:
+        pname = info.get("platform", "htb_ctf")
+        try:
+            platform = _platform_for(pname)
+            chall = NormalizedChallenge(
+                platform=pname, event_id=info.get("event_id", ""),
+                challenge_id=str(cid), name=info.get("name", ""),
+                category=info.get("category", ""), points=info.get("value"),
+                description="", target_kind=info.get("target_kind", "docker"),
+            )
+            platform.stop_instance(chall)
+            print(f"[ok] stop requested for instance {cid}")
+        except Exception as exc:
+            print(f"[warn] could not stop instance {cid}: {exc}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Clean CTF orchestrator workspace.")
     parser.add_argument("--root", default=".", help="Project root directory")
-    parser.add_argument("--platform", choices=["ctfd", "htb_ctf"], help="Limit scrubbing hints to a platform")
+    parser.add_argument("--platform", choices=["ctfd", "htb_ctf", "htb_cookie"], help="Limit scrubbing hints to a platform")
     parser.add_argument("--keep-config", action="store_true", help="Keep config.json and .env contents unchanged")
     parser.add_argument("--keep-prompts", action="store_true", help="Keep prompts/")
     parser.add_argument("--keep-runners", action="store_true", help="Keep runners/")

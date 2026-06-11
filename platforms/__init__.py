@@ -30,4 +30,8 @@ def get_platform(name: str, config: dict, *, session: Optional[str] = None,
         from platforms.htb_ctf_mcp import HTBCTFPlatform
 
         return HTBCTFPlatform(config, logger=logger, **kwargs)
+    if key in ("htb_cookie", "htb_web", "htb_bearer"):
+        from platforms.htb_cookie import HTBCookiePlatform
+
+        return HTBCookiePlatform(config, logger=logger, **kwargs)
     raise ValueError(f"Unknown platform: {name!r}")

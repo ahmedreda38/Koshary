@@ -10,10 +10,11 @@
 
 Autonomous **multi-platform** CTF solver framework for running Gemini, Codex, and optionally Claude through category-specific prompts, challenge workspaces, and parallel orchestration.
 
-Koshary now supports two platforms behind a common adapter interface:
+Koshary now supports three platforms behind a common adapter interface:
 
 1. **CTFd** — classic CTFd-hosted competitions (cookie-based).
-2. **Hack The Box CTF** — via HTB's official **CTF MCP** server (token-based), including Docker instance spawning and Fullpwn machines.
+2. **Hack The Box CTF (MCP)** — via HTB's official **CTF MCP** server (token-based), including Docker instance spawning and Fullpwn machines.
+3. **Hack The Box CTF (cookie/bearer)** — via the HTB web API with a captured browser session; works on events where MCP is disabled (`no_mcp`).
 
 The orchestrator never talks to a platform directly. It only receives a
 `NormalizedChallenge`, local files, target info, and a `submit_flag()` method, so
@@ -22,15 +23,16 @@ adding more platforms later is straightforward.
 ```text
 Koshary Core
 ├── platforms/ctfd.py          (CTFd adapter)
-└── platforms/htb_ctf_mcp.py   (HTB CTF MCP adapter)
+├── platforms/htb_ctf_mcp.py   (HTB CTF MCP adapter)
+└── platforms/htb_cookie.py    (HTB CTF cookie/bearer adapter)
 ```
 
 ## Overview
 
 Koshary is built around one main loop:
 
-1. Set competition metadata and routing with `setup_ctf.py` (CTFd) or `setup_htb.py` (HTB)
-2. Start the solver with `orchestrator.py --platform ctfd|htb_ctf`
+1. Set competition metadata and routing with `setup_ctf.py` (CTFd), `setup_htb.py` (HTB MCP), or `setup_htb_cookie.py` (HTB cookie/bearer)
+2. Start the solver with `orchestrator.py --platform ctfd|htb_ctf|htb_cookie`
 3. Inspect per-challenge workspaces under `challenges/`
 4. Reset the framework safely with `clean_workspace.py`
 
@@ -476,14 +478,98 @@ otherwise Koshary discovers and matches them at runtime.
 | `--scoreboard` | Print the event scoreboard and exit |
 | `--strategy` | Print a ranked solve queue and exit |
 
+## HTB CTF Mode — Cookie/Bearer (`htb_cookie`)
+
+A second HTB adapter drives the same JSON API the HTB CTF **web app** uses
+(`https://ctf.hackthebox.com/api/...`), authenticated with a captured browser
+session instead of an MCP token. Use this for events where MCP is disabled
+(`mcp_access_mode = no_mcp`, e.g. *CTF Try Out* / event `1434`).
+
+> ⚠️ This mode replays your live HTB session. Use only for events you are
+> authorized to access. **Never commit** the cookie/bearer or capture files —
+> `.env`, `htb_headers.txt`, `*.headers`, `burp_*.xml`, and `htb_requests` are
+> gitignored.
+
+### 1. Provide your session (Cookie + Bearer)
+
+Every captured HTB API request carries **both** a `Cookie` and an
+`Authorization: Bearer`, so the default `auth_mode` is `cookie_bearer`. Supply
+them one of two ways:
+
+```bash
+# A) Environment (.env)
+HTB_CTF_COOKIE='full Cookie header value'
+HTB_CTF_BEARER='Bearer token value (with or without the "Bearer " prefix)'
+HTB_CTF_USER_AGENT='your browser user agent'   # optional
+
+# B) From a captured request / Burp export -> gitignored htb_headers.txt
+python3 tools/import_burp_headers.py -i htb_requests -o htb_headers.txt
+```
+
+`tools/import_burp_headers.py` decodes a Burp XML export (or a raw request),
+writes only `Cookie` / `Authorization` / `User-Agent` to a `0600` file, and
+prints **header names only** — never the values.
+
+### 2. Configure + validate the event
+
+```bash
+python3 setup_htb_cookie.py --ctf-id 1434 --headers-file htb_headers.txt --check
+python3 setup_htb_cookie.py --ctf-id 1434 --headers-file htb_headers.txt --list
+python3 setup_htb_cookie.py --ctf-id 1434 --models 'web:G,crypto:L,pwn:C,rev:L'
+```
+
+`--check` calls `GET /api/ctfs/{id}/menu` and confirms `userCanViewChallenges`
+is true (a `403` means you have not joined the event in the browser yet; a `401`
+means the cookie/bearer expired — re-capture them).
+
+### 3. List, download, start, solve
+
+```bash
+# List challenges
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --list-challenges
+
+# Download + extract all attachments, no solving
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --download --sync-only
+
+# Start one Docker challenge and write its target.json
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --challenge-id 31856 --start-only
+
+# Solve web challenges, planning on, submission off (early testing)
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --categories web --plan --no-submit
+
+# Solve + submit
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --categories web,crypto,pwn --parallel 3 --plan
+
+# Submit / stop one challenge manually
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --challenge-id 40742 --submit-candidate 'HTB{...}'
+python3 orchestrator.py --platform htb_cookie --ctf-id 1434 --challenge-id 40742 --stop-instance
+```
+
+### Cookie-mode configuration (`config.json` → `htb_cookie`)
+
+| Key | Meaning |
+| --- | --- |
+| `base_url` | `https://ctf.hackthebox.com` |
+| `ctf_id` | Numeric event id (e.g. `1434`) |
+| `auth_mode` | `cookie_bearer` (default), `cookie_only`, or `bearer_only` |
+| `auto_start_instances` | Auto-spawn Docker containers (default `true`) |
+| `auto_start_fullpwn` | Auto-spawn Fullpwn machines (default `false`; VPN-bound) |
+| `auto_stop_on_solve` | Stop the container after a solve (default `false`) |
+| `download_password` | Archive password tried after passwordless (`hackthebox`) |
+| `max_wrong_submissions_per_challenge` | Wrong-submission cap (default `3`) |
+| `poll_seconds` / `poll_interval` | Container-ready polling window |
+
+Workspaces are written under `challenges/htb_cookie/<ctf_id>/<category>/<id>_<slug>/`.
+
 ### Tests
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
-All HTB tests use mocked MCP fixtures under `tests/fixtures/htb/` — no network
-and no real token are required.
+All HTB tests use mocked fixtures — MCP mode under `tests/fixtures/htb/` and
+cookie/bearer mode under `tests/fixtures/htb_cookie/` (with a no-network fake
+session). No network, token, or session is required.
 
 ## `first_blood.py`
 
