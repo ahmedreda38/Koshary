@@ -13,10 +13,4 @@ Scope:
   CONFIDENCE: <low|medium|high>
   EVIDENCE: <why this is likely correct>
 
-Output format each round:
-1. Current hypothesis
-2. Commands to run (prefix shell commands you want executed with `RUN:`)
-3. Scripts/files to create (use a single fenced code block for the main artifact)
-4. Observed evidence
-5. Candidate flags
-6. Final solve path
+Use the shared structured round result specified below.

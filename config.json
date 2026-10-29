@@ -63,11 +63,12 @@
     "workspace_max_files": 40,
     "workspace_max_chars_per_file": 12000,
     "include_categories": [],
-    "exclude_categories": []
+    "exclude_categories": [],
+    "reference_root": "references/ctf-skills"
   },
   "routing": {
-    "web": "gemini",
-    "web exploitation": "gemini",
+    "web": "codex",
+    "web exploitation": "codex",
     "crypto": "claude",
     "cryptography": "claude",
     "pwn": "codex",
@@ -75,12 +76,12 @@
     "reverse": "claude",
     "rev": "claude",
     "reverse engineering": "claude",
-    "mobile": "gemini",
-    "android": "gemini",
+    "mobile": "codex",
+    "android": "codex",
     "misc": "claude",
     "miscellaneous": "claude",
-    "forensics": "gemini",
-    "dfir": "gemini",
+    "forensics": "codex",
+    "dfir": "codex",
     "fullpwn": "codex",
     "full-pwn": "codex",
     "machine": "codex",
@@ -90,39 +91,48 @@
   "models": {
     "gemini": {
       "runner": "bash runners/run_gemini.sh",
-      "prompt_template": "prompts/web.txt"
+      "prompt_template": "prompts/web.txt",
+      "execution_owner": "agent"
     },
     "gemini_misc": {
       "runner": "bash runners/run_gemini.sh",
-      "prompt_template": "prompts/misc.txt"
+      "prompt_template": "prompts/misc.txt",
+      "execution_owner": "agent"
     },
     "gemini_forensics": {
       "runner": "bash runners/run_gemini.sh",
-      "prompt_template": "prompts/forensics.txt"
+      "prompt_template": "prompts/forensics.txt",
+      "execution_owner": "agent"
     },
     "codex_crypto": {
       "runner": "bash runners/run_codex.sh",
-      "prompt_template": "prompts/crypto.txt"
+      "prompt_template": "prompts/crypto.txt",
+      "execution_owner": "agent"
     },
     "codex_pwn": {
       "runner": "bash runners/run_codex.sh",
-      "prompt_template": "prompts/pwn.txt"
+      "prompt_template": "prompts/pwn.txt",
+      "execution_owner": "agent"
     },
     "codex_rev": {
       "runner": "bash runners/run_codex.sh",
-      "prompt_template": "prompts/rev.txt"
+      "prompt_template": "prompts/rev.txt",
+      "execution_owner": "agent"
     },
     "codex_mobile": {
       "runner": "bash runners/run_codex.sh",
-      "prompt_template": "prompts/mobile.txt"
+      "prompt_template": "prompts/mobile.txt",
+      "execution_owner": "agent"
     },
     "codex_fullpwn": {
       "runner": "bash runners/run_codex.sh",
-      "prompt_template": "prompts/pwn.txt"
+      "prompt_template": "prompts/pwn.txt",
+      "execution_owner": "agent"
     },
     "claude": {
       "runner": "bash runners/run_claude.sh",
-      "prompt_template": "prompts/misc.txt"
+      "prompt_template": "prompts/misc.txt",
+      "execution_owner": "agent"
     }
   },
   "workspace": {

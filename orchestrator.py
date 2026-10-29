@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import shutil
 import subprocess
 import sys
@@ -176,6 +177,26 @@ def extract_flags(text: str, patterns: List[str]) -> List[str]:
     return out
 
 
+def parse_solver_result(text: str) -> Optional[Dict[str, Any]]:
+    """Read the final structured result, rejecting malformed or partial records."""
+    marker = "KOSHARY_RESULT:"
+    lines = [line[len(marker):].strip() for line in text.splitlines() if line.startswith(marker)]
+    if not lines:
+        return None
+    try:
+        result = json.loads(lines[-1])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(result, dict) or result.get("status") not in {"progress", "blocked", "candidate"}:
+        return None
+    for key in ("evidence", "artifacts", "candidates"):
+        if not isinstance(result.get(key), list) or not all(isinstance(x, str) for x in result[key]):
+            return None
+    if not isinstance(result.get("next_action"), str):
+        return None
+    return {k: result[k] for k in ("status", "evidence", "artifacts", "candidates", "next_action")}
+
+
 def extract_first_code_block(text: str) -> Tuple[Optional[str], Optional[str]]:
     m = re.search(r"```([a-zA-Z0-9_+\-]*)\n(.*?)```", text, re.DOTALL)
     if not m:
@@ -213,10 +234,31 @@ def ensure_dirs(*paths: Path) -> None:
 
 def choose_route(category: str, routing: Dict[str, str]) -> Optional[str]:
     c = category.lower().strip()
-    for key, route in routing.items():
-        if key in c:
-            return route
+    for key in sorted(routing, key=len, reverse=True):
+        if key.lower() in c:
+            return routing[key]
     return None
+
+
+def category_prompt(category: str, fallback: str) -> str:
+    """Select instructions by challenge type, independent of the agent CLI."""
+    c = category.lower().strip()
+    groups = (
+        (("fullpwn", "full-pwn", "machine"), "fullpwn.md"),
+        (("binary exploitation", "pwn"), "pwn.txt"),
+        (("reverse", "rev"), "rev.txt"),
+        (("cryptography", "crypto"), "crypto.txt"),
+        (("forensics", "dfir"), "forensics.txt"),
+        (("mobile", "android"), "mobile.txt"),
+        (("hardware",), "hardware.txt"),
+        (("blockchain", "web3"), "blockchain.txt"),
+        (("web",), "web.txt"),
+        (("misc",), "misc.txt"),
+    )
+    for aliases, filename in groups:
+        if any(alias in c for alias in aliases):
+            return "prompts/" + filename
+    return fallback
 
 
 def category_matches_filter(category: str, category_filter: str, routing: Dict[str, str]) -> bool:
@@ -371,29 +413,48 @@ def collect_workspace_text(chdir: Path, max_files: int = 40, max_chars_per_file:
     return "\n".join(chunks)
 
 
+def collect_workspace_inventory(chdir: Path, max_files: int = 100) -> str:
+    """List local artifacts without repeatedly embedding their contents."""
+    entries = []
+    for p in sorted(chdir.rglob("*")):
+        rel = p.relative_to(chdir)
+        if "agent_rounds" in rel.parts or any(part.startswith(".") for part in rel.parts):
+            continue
+        if p.is_symlink() or not p.is_file():
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        entries.append(f"- {rel} ({size} bytes)")
+        if len(entries) >= max_files:
+            entries.append("- Inventory limit reached; inspect the workspace for additional files.")
+            break
+    return "\n".join(entries) if entries else "- no files"
+
+
 def collect_history_text(chdir: Path, current_round: int) -> str:
+    """Summarize recent structured results, falling back to legacy logs."""
     history = []
     rounds_dir = chdir / "agent_rounds"
-    
-    for r in range(1, current_round):
-        round_summary = [f"--- ROUND {r} ---"]
-        out_path = rounds_dir / f"round_{r:02d}.out.txt"
-        if out_path.exists():
-            out_txt = out_path.read_text(errors="ignore").strip()
-            round_summary.append(f"[Model Output]:\n{out_txt[-1500:]}")
-            
-        exec_path = rounds_dir / f"round_{r:02d}.exec.txt"
-        if exec_path.exists():
-            exec_txt = exec_path.read_text(errors="ignore").strip()
-            round_summary.append(f"[Execution Result]:\n{exec_txt[:800]}")
-            
-        cmd_path = rounds_dir / f"round_{r:02d}.commands.txt"
-        if cmd_path.exists():
-            cmd_txt = cmd_path.read_text(errors="ignore").strip()
-            round_summary.append(f"[Command Results]:\n{cmd_txt[:800]}")
-            
-        history.append("\n".join(round_summary))
-        
+    for r in range(max(1, current_round - 3), current_round):
+        result_path = rounds_dir / f"round_{r:02d}.result.json"
+        result = None
+        if result_path.exists():
+            try:
+                result = parse_solver_result("KOSHARY_RESULT: " + result_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError):
+                pass
+        if result:
+            history.append(f"--- ROUND {r} ---\n" + json.dumps(result, ensure_ascii=False)[:2500])
+        else:
+            out_path = rounds_dir / f"round_{r:02d}.out.txt"
+            if out_path.exists():
+                history.append(f"--- ROUND {r} (legacy output) ---\n" + out_path.read_text(errors="ignore")[-1500:])
+            for suffix in ("exec", "commands"):
+                path = rounds_dir / f"round_{r:02d}.{suffix}.txt"
+                if path.exists():
+                    history.append(f"[{suffix}]\n" + path.read_text(errors="ignore")[-800:])
     return "\n\n".join(history)
 
 
@@ -411,10 +472,6 @@ def build_htb_context(root: Path, chall: Challenge) -> str:
         if sys_path.exists():
             parts.append(sys_path.read_text(encoding="utf-8").strip())
             break
-    if "fullpwn" in (chall.category or "").lower() or chall.target_kind == "fullpwn":
-        fp_path = root / "prompts" / "fullpwn.md"
-        if fp_path.exists():
-            parts.append(fp_path.read_text(encoding="utf-8").strip())
     target_block = (
         "[TARGET CONTEXT]\n"
         f"Platform: {chall.platform}\n"
@@ -440,7 +497,7 @@ def render_prompt(template_path: Path, chall: Challenge, challenge_dir: Path, ro
             "\n[MANDATORY DOCUMENTATION]\n"
             "If you identify the flag or have a working exploit, you MUST also generate a 'walkthrough.md' file. "
             "This file should explain: 1) Challenge structure, 2) Identified vulnerabilities/flaws, 3) Detailed exploitation path. "
-            "You can create this file using a fenced code block or a RUN: command."
+            "Create this file in the challenge workspace."
         )
 
     body = template.format(
@@ -458,7 +515,12 @@ def render_prompt(template_path: Path, chall: Challenge, challenge_dir: Path, ro
         plan=plan,
         walkthrough_instruction=walkthrough_instr
     )
-    return prefix + body
+    return prefix + body + (
+        "\nFinish with exactly one line starting KOSHARY_RESULT: followed by JSON "
+        "with status (progress, blocked, or candidate), evidence (array of concise "
+        "observations including completed tests and outcomes), artifacts (array of paths), candidates (array of observed "
+        "flag strings), and next_action (string). For each candidate, include the exact flag and its observed source in evidence. Do not include speculative flags.\n"
+    )
 
 
 # =========================
@@ -598,16 +660,21 @@ def run_subprocess(cmd: List[str], cwd: Path, timeout: int = 180, env: Optional[
     if env:
         run_env.update(env)
         
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout,
-        env=run_env,
+    proc = subprocess.Popen(
+        cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=run_env, start_new_session=(os.name == "posix"),
     )
-    output = (proc.stdout or "") + ("\n" if proc.stdout and proc.stderr else "") + (proc.stderr or "")
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if os.name == "posix":
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        proc.communicate()
+        raise
+    output = (stdout or "") + ("\n" if stdout and stderr else "") + (stderr or "")
     return proc.returncode, output
 
 
@@ -619,7 +686,7 @@ def run_model(runner_cmd: str, prompt_file: Path, cwd: Path, timeout: int = 300)
             script = (Path(__file__).resolve().parent / script).resolve()
         parts[1] = str(script)
     parts.append(str(prompt_file.resolve()))
-    return run_subprocess(parts, cwd=cwd, timeout=timeout)
+    return run_subprocess(parts, cwd=cwd, timeout=timeout, env={"TIMEOUT_SECONDS": str(timeout)})
 
 
 def save_generated_artifact(chdir: Path, round_no: int, lang: str, code: str) -> Optional[Path]:
@@ -780,7 +847,13 @@ def process_challenge(
         return {"status": "skipped", "challenge_id": cid}
     model_cfg = config["models"][model_key]
     runner_cmd = model_cfg["runner"]
-    prompt_template = root / model_cfg["prompt_template"]
+    execution_owner = model_cfg.get("execution_owner")
+    if execution_owner is None:
+        execution_owner = "orchestrator" if (config["ctf"].get("legacy_execute_run_commands", False) or config["ctf"].get("legacy_execute_code_blocks", False)) else "agent"
+    if execution_owner not in {"agent", "orchestrator"}:
+        log_err(f"Invalid execution_owner for {model_key}: {execution_owner}")
+        return {"status": "skipped", "challenge_id": cid}
+    prompt_template = root / category_prompt(chall.category, model_cfg["prompt_template"])
 
     chdir = challenge_workspace(root, config, chall)
     rounds_dir = chdir / "agent_rounds"
@@ -839,7 +912,7 @@ def process_challenge(
         htb_prefix = build_htb_context(root, chall)
 
         db.mark_status(cid, "running")
-        last_workspace_hash = None
+        seen_evidence: set[str] = set()
         idle_rounds = 0
         solved = False
 
@@ -856,19 +929,34 @@ def process_challenge(
                 instance_manager.refresh_target(platform, chall, chdir, logger=_AdaptLogger())
                 htb_prefix = build_htb_context(root, chall)
 
-            workspace_text = collect_workspace_text(chdir)
+            workspace_text = collect_workspace_text(
+                chdir, max_files=config["ctf"].get("workspace_max_files", 40),
+                max_chars_per_file=config["ctf"].get("workspace_max_chars_per_file", 12000))
+            inventory_text = collect_workspace_inventory(chdir, max_files=config["ctf"].get("workspace_inventory_max_files", 100))
             history_text = collect_history_text(chdir, round_no)
 
             workspace_hash = sha1_text(workspace_text)
-            if workspace_hash == last_workspace_hash:
-                idle_rounds += 1
-                if idle_rounds >= max_idle_rounds:
-                    log_warn(f"Challenge #{cid} stalled (no workspace changes). Terminating.")
-                    break
-            else: idle_rounds = 0
-            last_workspace_hash = workspace_hash
+            result = None
 
-            prompt = render_prompt(prompt_template, chall, chdir, round_no, workspace_text[:20000], history_text[:20000], env_info=env_with_dns, plan=plan_txt, walkthrough_active=walkthrough, prefix=htb_prefix)
+            prompt = render_prompt(prompt_template, chall, chdir, round_no, (inventory_text[:12000] if execution_owner == "agent" else workspace_text[:20000]), history_text[-9000:], env_info=env_with_dns, plan=plan_txt, walkthrough_active=walkthrough, prefix=htb_prefix)
+            reference_root = config["ctf"].get("reference_root")
+            if execution_owner == "agent" and reference_root:
+                category_reference = {
+                    "web.txt": "ctf-web", "pwn.txt": "ctf-pwn", "rev.txt": "ctf-reverse",
+                    "crypto.txt": "ctf-crypto", "forensics.txt": "ctf-forensics",
+                    "mobile.txt": "ctf-reverse", "misc.txt": "ctf-misc",
+                }.get(prompt_template.name)
+                if category_reference:
+                    reference_base = Path(reference_root).expanduser()
+                    if not reference_base.is_absolute():
+                        reference_base = root / reference_base
+                    reference_path = reference_base.resolve() / category_reference / "SKILL.md"
+                    if reference_path.is_file():
+                        prompt += f"\nOptional reference: {reference_path}. Read only relevant sections when needed; do not install packages automatically.\n"
+            if execution_owner == "agent":
+                prompt += "\nWorkspace entries are a file inventory; read relevant files directly. Execute investigation tools yourself. RUN lines and fenced code are not executed by the orchestrator.\n"
+            else:
+                prompt += "\nThe orchestrator executes RUN: command lines and the first fenced code block; use these only for actions intended to run.\n"
             prompt_file = rounds_dir / f"round_{round_no:02d}.prompt.txt"
             prompt_file.write_text(prompt, encoding="utf-8")
 
@@ -876,25 +964,34 @@ def process_challenge(
             try:
                 rc, output = run_model(runner_cmd, prompt_file, chdir, timeout=model_timeout)
 
+                if rc != 0:
+                    log_err(f"Model runner failed for #{cid} (exit {rc}); ignoring its output.")
+                    db.add_error("model_runner", cid, f"runner exited with status {rc}")
+                    break
+
                 # Extract from RAW output
                 lang, code = extract_first_code_block(output)
-                run_commands = extract_run_commands(output)
+                run_commands = extract_run_commands(output, max_commands=config["ctf"].get("max_run_commands_per_round", 4))
 
                 cleaned_output = clean_model_output(output)
 
                 out_file = rounds_dir / f"round_{round_no:02d}.out.txt"
                 out_file.write_text(cleaned_output, encoding="utf-8")
                 combined_text = cleaned_output
+                result = parse_solver_result(cleaned_output)
+                if result is not None:
+                    (rounds_dir / f"round_{round_no:02d}.result.json").write_text(
+                        json.dumps(result, indent=2), encoding="utf-8")
 
                 # RUN Commands
-                if run_commands:
+                if run_commands and execution_owner == "orchestrator" and ("execution_owner" in model_cfg or config["ctf"].get("legacy_execute_run_commands", False)):
                     cmd_results = run_model_commands(run_commands, chdir, timeout=config["ctf"].get("command_timeout", 90), env=exec_env)
                     db.inc_stat("commands_executed", len(cmd_results))
                     combined_text += "\n" + "\n".join([r[2] for r in cmd_results])
                     (rounds_dir / f"round_{round_no:02d}.commands.txt").write_text("\n\n".join([f"$ {r[0]}\n{r[2]}" for r in cmd_results]))
 
                 # Artifact Execution
-                if code:
+                if code and execution_owner == "orchestrator" and ("execution_owner" in model_cfg or config["ctf"].get("legacy_execute_code_blocks", False)):
                     artifact_path = save_generated_artifact(chdir, round_no, lang or "", code)
                     exec_rc, exec_output = run_generated_artifact(artifact_path, timeout=config["ctf"].get("artifact_timeout", 240), env=exec_env)
                     db.inc_stat("artifacts_executed", 1)
@@ -902,9 +999,20 @@ def process_challenge(
                     combined_text += "\n" + exec_output
 
                 # Flag Detection & Submission
-                candidates = list(extract_flags(combined_text, config["ctf"]["flag_patterns"]))
-                if allow_nonstandard:
-                    candidates += [c.value for c in extract_candidate_answers(combined_text)]
+                candidates = []
+                if result is not None and result["status"] == "candidate":
+                    evidence_text = "\n".join(result["evidence"])
+                    for value in result["candidates"]:
+                        if value not in evidence_text or not value.strip():
+                            log_warn(f"Skipping candidate without matching evidence for #{cid}")
+                            continue
+                        candidates.extend(extract_flags(value, config["ctf"]["flag_patterns"]))
+                        if allow_nonstandard:
+                            candidates.extend(c.value for c in extract_candidate_answers(value))
+                elif result is None and config["ctf"].get("legacy_unstructured_flags", False):
+                    candidates.extend(extract_flags(combined_text, config["ctf"]["flag_patterns"]))
+                    if allow_nonstandard:
+                        candidates.extend(c.value for c in extract_candidate_answers(combined_text))
 
                 if _solve_with_candidates(chall, candidates, platform, db, chdir, submit_mode, max_wrong):
                     solved = True
@@ -913,9 +1021,25 @@ def process_challenge(
                     break
 
             except subprocess.TimeoutExpired:
-                log_err(f"Model timeout on #{cid}, round {round_no}")
+                log_err(f"Execution timeout on #{cid}, round {round_no}")
+                db.add_error("timeout", cid, f"execution timed out in round {round_no}")
+                break
             except Exception as e:
                 log_err(f"Agent error on #{cid}, round {round_no}: {redact(str(e))}")
+
+            current_workspace = collect_workspace_text(
+                chdir, max_files=config["ctf"].get("workspace_max_files", 40),
+                max_chars_per_file=config["ctf"].get("workspace_max_chars_per_file", 12000))
+            evidence = {" ".join(item.split()).casefold() for item in (result or {}).get("evidence", []) if item.strip()}
+            new_evidence = evidence - seen_evidence
+            seen_evidence.update(evidence)
+            if sha1_text(current_workspace) != workspace_hash or new_evidence:
+                idle_rounds = 0
+            else:
+                idle_rounds += 1
+                if idle_rounds >= max_idle_rounds:
+                    log_warn(f"Challenge #{cid} stalled (no new workspace changes or evidence). Terminating.")
+                    break
 
         if solved and auto_stop and platform.needs_instance(chall):
             instance_manager.teardown_target(platform, chall, chdir, logger=_AdaptLogger())

@@ -9,7 +9,22 @@ Prioritize, in order:
 - credential discovery
 - initial foothold
 - privilege escalation
-- user/root or challenge flag discovery (HTB{...} / CHTB{...})
+- user/root or challenge flag discovery (HTB{{...}} / CHTB{{...}})
 
 Always maintain a clear attack-path log in notes.md.
 Avoid destructive actions. Use parallel=1 expectations: this target is stateful.
+
+Challenge: {challenge_name}
+Category: {category}
+Points: {value}
+Round: {round_no}
+
+Description: {description}
+Connection: {connection_info}
+Environment: {env_info}
+Workspace: {workdir}
+Downloaded files: {files}
+Previous rounds: {history}
+Current workspace files: {workspace}
+Plan: {plan}
+{walkthrough_instruction}

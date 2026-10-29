@@ -678,3 +678,29 @@ python3 clean_workspace.py --yes
 ## Disclaimer
 
 Use this framework only in authorized CTF environments and within competition rules. Automated solving, polling, and submission may be restricted in some events.
+
+### Category prompts and generated commands
+
+Category instructions are chosen from `prompts/` independently of the configured agent. Unknown categories use that agent's configured `prompt_template`. Recent history summarizes up to three structured round results, falling back to log excerpts when needed. Agent-owned runs receive a file inventory (default maximum 100 entries, configurable with `workspace_inventory_max_files`) and can read relevant files themselves. Orchestrator-owned runs retain file content snapshots; workspace collection honors `workspace_max_files` and `workspace_max_chars_per_file`. Full logs and results remain on disk.
+
+Each model configuration has `execution_owner`: `agent` lets the CLI run its own tools and ignores generated `RUN:` lines and code blocks; `orchestrator` runs the requested `RUN:` lines and the first fenced code block. The default is `agent`. For older configurations without this setting, the `ctf.legacy_execute_run_commands` and `ctf.legacy_execute_code_blocks` switches retain their individual behavior. Explicit `execution_owner` takes precedence.
+
+### Codex model and effort
+
+The Codex runner defaults to `gpt-6.1-terra` at `high` reasoning effort. Set `CODEX_MODEL` and `CODEX_EFFORT` in the environment before starting Koshary to override them, for example `CODEX_MODEL=gpt-6-luna CODEX_EFFORT=medium python3 orchestrator.py`. The account and CLI must support the selected model and effort. The runner does not automatically switch models on failure.
+
+Gemini-routed categories now use Codex. Claude defaults to `claude-opus-5-5` at `high` effort; override with `CLAUDE_MODEL` and `CLAUDE_EFFORT`. The runner does not automatically switch models.
+
+### Structured solver results
+
+Each round asks the agent to end with a single `KOSHARY_RESULT:` line containing JSON with `status` (`progress`, `blocked`, or `candidate`), string arrays `evidence`, `artifacts`, and `candidates`, and a string `next_action`. Valid results are saved under `agent_rounds/round_NN.result.json`, and flag extraction uses their candidate list. Automatic submission requires candidate status and evidence containing the exact candidate; the agent is instructed to describe its source. Missing or malformed results do not submit flags by default; `ctf.legacy_unstructured_flags=true` restores free-text extraction. Evidence is an agent assertion, not independent verification.
+
+### CTFd preflight
+
+Set `CTFD_SESSION` in `.env`, then run `python3 preflight_ctfd.py --url https://EVENT_HOST`. The check reads the challenge listing and checks the CSRF nonce and configured runner executables; it does not submit a flag. A successful listing alone does not prove the session is authenticated if the event allows public access. Pass the same URL to Koshary with `--platform ctfd --url https://EVENT_HOST`.
+
+A nonzero model-runner exit or execution timeout ends that challenge's run and records an error rather than launching repeated model rounds. The configured model timeout is passed to the runner and enforced by the parent process. REA must be registered in the Codex account used to launch Koshary; its availability depends on the child session and permissions.
+
+### Optional category references
+
+For agent-owned runners, set `ctf.reference_root` in `config.json` to a path containing `ctf-web/SKILL.md`, `ctf-pwn/SKILL.md`, and similar category directories. Koshary provides the relevant path in the prompt without embedding the file; no reference is loaded when the setting or matching file is absent. Review the reference contents before use. The default is the vendored `references/ctf-skills` Markdown collection; its pinned revision and limitations are documented in `docs/skills-runner-audit.md`.

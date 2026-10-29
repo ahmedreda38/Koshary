@@ -32,6 +32,9 @@ Plan for this challenge:
 
 Your objective:
 1. Identify memory corruption vulnerabilities (e.g., Buffer Overflow, Format String, Use After Free).
-2. If you want code/scripts (e.g., a pwntools exploit script), output the full file content.
-3. If you identify the flag, print only the exact flag on its own line.
+2. Write necessary scripts to the workspace using the configured execution mode.
+3. If you identify a flag, include it in the structured result candidates.
 4. If stuck, produce the single highest-value next test.
+
+Category guidance: Inspect file type, architecture, mitigations and libc; identify controllable input and the primitive. Reproduce locally, measure offsets, and verify assumptions before using the remote service.
+Record confirmed observations and the next test in a short progress file.

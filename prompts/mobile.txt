@@ -33,6 +33,9 @@ Plan for this challenge:
 Your objective:
 1. Analyze the mobile application (APK, IPA, etc.).
 2. Use tools like strings, grep, or decompilers (Jadx/Baksmali style logic) to find flags or logic flaws.
-3. If you want code/scripts (e.g., a python script to decrypt a local database), output the full file content.
-4. If you identify the flag, print only the exact flag on its own line.
+3. Write necessary scripts to the workspace using the configured execution mode.
+4. If you identify a flag, include it in the structured result candidates.
 5. If stuck, produce the single highest-value next test.
+
+Category guidance: Identify APK or IPA and architecture, inspect manifest, entry points and bundled resources; trace relevant validation or network behavior. Use an emulator only when static evidence is insufficient.
+Record confirmed observations and the next test in a short progress file.
