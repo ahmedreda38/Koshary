@@ -189,9 +189,9 @@ class CTFdPlatform(BasePlatform):
         cid = int(challenge.raw.get("id", challenge.challenge_id))
         resp = self.client.submit_flag(cid, flag)
         msg_text = json.dumps(resp).lower()
-        accepted = resp.get("success") is True and not any(
-            bad in msg_text for bad in ("incorrect", "wrong")
-        )
+        data = resp.get("data")
+        status = data.get("status", "") if isinstance(data, dict) else ""
+        accepted = resp.get("success") is True and status in ("correct", "already_solved")
         message = ""
         data = resp.get("data")
         if isinstance(data, dict):

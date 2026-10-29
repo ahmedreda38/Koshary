@@ -34,6 +34,8 @@ run_codex() {
       -c "model_reasoning_effort=$effort" \
       -s workspace-write \
       -c approval_policy=never \
+      -c mcp_servers.rea.tools.open_binary.approval_mode=approve \
+      -c mcp_servers.rea.tools.close_binary.approval_mode=approve \
       --skip-git-repo-check \
       < "$prompt_file"
 }

@@ -35,10 +35,15 @@ def main():
     print('OK: configured runner CLIs are on PATH')
     try:
         client = CTFdClient(url, session)
+        response = client.s.get(f"{client.base_url}/api/v1/users/me", timeout=20, allow_redirects=False)
+        response.raise_for_status()
+        if response.status_code != 200 or not response.json().get("success"):
+            raise ValueError("session not authenticated")
         challenges = client.get_challenges()
         if not client.nonce:
-            print('WARN: CSRF nonce unavailable; flag submission may fail')
-        print(f'OK: challenge listing returned {len(challenges)} challenges')
+            print('FAIL: CSRF nonce unavailable; flag submission may fail', file=sys.stderr)
+            return 1
+        print(f'OK: authenticated session and {len(challenges)} listed challenges')
     except Exception as exc:
         print(f'FAIL: CTFd access check failed: {type(exc).__name__}', file=sys.stderr)
         return 1

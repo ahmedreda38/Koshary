@@ -181,6 +181,17 @@ echo 'KOSHARY_RESULT: {"status":"candidate","evidence":["observed HTB{correct} i
             platform = FakePlatform()
             orchestrator.process_challenge(platform.get_challenge("misc-1"), self.config, orchestrator.StateDB(self.root / "db.json"), platform, REPO, auto_start=False)
 
+    def test_duplicates_and_wrong_limit_stop_submissions(self):
+        db = orchestrator.StateDB(self.root / "state" / "db.json")
+        platform = FakePlatform()
+        challenge = platform.get_challenge("misc-1")
+        workspace = self.root / "challenge"
+        workspace.mkdir()
+        result = orchestrator._solve_with_candidates(challenge, ["HTB{wrong}", "HTB{wrong}", "HTB{other}"], platform, db, workspace, "auto", 1)
+        self.assertFalse(result)
+        self.assertEqual(platform.submitted, ["HTB{wrong}"])
+        self.assertEqual(db.count_attempts(challenge.challenge_id), 1)
+
     def test_no_submit_mode_does_not_submit(self):
         db = orchestrator.StateDB(self.root / "state" / "db.json")
         platform = FakePlatform()

@@ -50,6 +50,15 @@ class TestCTFdAdapter(unittest.TestCase):
         self.assertTrue(self.p.submit_flag(c, "flag{good}").accepted)
         self.assertFalse(self.p.submit_flag(c, "flag{bad}").accepted)
 
+    def test_submission_status_must_be_explicitly_accepted(self):
+        c = self.p.get_challenge("1")
+        for status in ("ratelimited", "paused", "authentication_required", "unknown", ""):
+            with self.subTest(status=status):
+                self.p.client.submit_flag = lambda cid, flag: {"success": True, "data": {"status": status, "message": "Try later"}}
+                self.assertFalse(self.p.submit_flag(c, "flag{x}").accepted)
+        self.p.client.submit_flag = lambda cid, flag: {"success": True, "data": {"status": "already_solved"}}
+        self.assertTrue(self.p.submit_flag(c, "flag{x}").accepted)
+
 
 if __name__ == "__main__":
     unittest.main()

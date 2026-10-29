@@ -697,10 +697,12 @@ Each round asks the agent to end with a single `KOSHARY_RESULT:` line containing
 
 ### CTFd preflight
 
-Set `CTFD_SESSION` in `.env`, then run `python3 preflight_ctfd.py --url https://EVENT_HOST`. The check reads the challenge listing and checks the CSRF nonce and configured runner executables; it does not submit a flag. A successful listing alone does not prove the session is authenticated if the event allows public access. Pass the same URL to Koshary with `--platform ctfd --url https://EVENT_HOST`.
+Set `CTFD_SESSION` in `.env`, then run `python3 preflight_ctfd.py --url https://EVENT_HOST`. The check verifies the current user session, reads the challenge listing, and checks the CSRF nonce and configured runner executables; it does not submit a flag. Pass the same URL to Koshary with `--platform ctfd --url https://EVENT_HOST`.
 
 A nonzero model-runner exit or execution timeout ends that challenge's run and records an error rather than launching repeated model rounds. The configured model timeout is passed to the runner and enforced by the parent process. REA must be registered in the Codex account used to launch Koshary; its availability depends on the child session and permissions.
 
 ### Optional category references
 
 For agent-owned runners, set `ctf.reference_root` in `config.json` to a path containing `ctf-web/SKILL.md`, `ctf-pwn/SKILL.md`, and similar category directories. Koshary provides the relevant path in the prompt without embedding the file; no reference is loaded when the setting or matching file is absent. Review the reference contents before use. The default is the vendored `references/ctf-skills` Markdown collection; its pinned revision and limitations are documented in `docs/skills-runner-audit.md`.
+
+The Codex runner preapproves REA `open_binary` and `close_binary` so the non-interactive runner can create and release analysis sessions. Other MCP operations keep their configured approval behavior. These operations may launch analysis helpers and create temporary state.
